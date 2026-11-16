@@ -1,0 +1,370 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.admin == true ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Validation Blueprints
+    function isValidUserPublicProfile(data, uid) {
+      return data.keys().hasAll([
+        'uid', 'username', 'displayName', 'joinedAt', 'updatedAt',
+        'distinctPotholeCount', 'evidenceCount', 'unlockedBadgesCount',
+        'showOnLeaderboard', 'shareNeighborhood'
+      ])
+      && data.keys().hasOnly([
+        'uid', 'username', 'displayName', 'photoURL', 'homeNeighborhood', 'joinedAt', 'updatedAt',
+        'distinctPotholeCount', 'evidenceCount', 'unlockedBadgesCount',
+        'showOnLeaderboard', 'shareNeighborhood'
+      ])
+      && data.uid == uid
+      && isValidId(data.uid)
+      && data.username is string && data.username.size() >= 3 && data.username.size() <= 32 && data.username.matches('^[a-z0-9_]+$')
+      && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 64
+      && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 512))
+      && (!('homeNeighborhood' in data) || (data.homeNeighborhood is string && data.homeNeighborhood.size() <= 64))
+      && data.joinedAt is timestamp
+      && data.updatedAt is timestamp
+      && data.distinctPotholeCount is int && data.distinctPotholeCount >= 0
+      && data.evidenceCount is int && data.evidenceCount >= 0
+      && data.unlockedBadgesCount is int && data.unlockedBadgesCount >= 0
+      && data.showOnLeaderboard is bool
+      && data.shareNeighborhood is bool;
+    }
+
+    function isValidUserPrivateAccount(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'notificationsEnabled', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'notificationsEnabled', 'createdAt', 'updatedAt'])
+        && data.uid == uid
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.notificationsEnabled is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMediaObject(data, mediaId) {
+      return data.keys().hasAll([
+        'mediaId', 'ownerId', 'contentType', 'sizeBytes', 'width', 'height', 'data', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'mediaId', 'ownerId', 'contentType', 'sizeBytes', 'width', 'height', 'data', 'createdAt'
+      ])
+      && data.mediaId == mediaId
+      && isValidId(data.mediaId)
+      && isValidId(data.ownerId)
+      && data.ownerId == request.auth.uid
+      && data.contentType in ['image/jpeg', 'image/png', 'image/webp']
+      && data.sizeBytes is int && data.sizeBytes > 0 && data.sizeBytes <= 400000
+      && data.width is int && data.width > 0 && data.width <= 1280
+      && data.height is int && data.height > 0 && data.height <= 1280
+      && data.data is bytes && data.data.size() > 0 && data.data.size() <= 400000
+      && data.createdAt is timestamp;
+    }
+
+    function isValidStorageVerificationRecord(data, uid, checkId) {
+      return data.keys().hasAll([
+        'checkId', 'userId', 'storagePath', 'downloadUrl', 'contentType', 'sizeBytes', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'checkId', 'userId', 'storagePath', 'downloadUrl', 'contentType', 'sizeBytes', 'createdAt'
+      ])
+      && data.checkId == checkId
+      && isValidId(data.checkId)
+      && data.userId == uid
+      && isValidId(data.userId)
+      && data.storagePath is string && data.storagePath.size() >= 5 && data.storagePath.size() <= 256
+      && data.storagePath.matches('^mediaObjects/[a-zA-Z0-9_\\-]+$')
+      && data.downloadUrl is string && data.downloadUrl.size() >= 12 && data.downloadUrl.size() <= 1024
+      && data.downloadUrl.matches('^(/api/media/|https://)[a-zA-Z0-9_\\-\\./\\?=&%]+$')
+      && data.contentType in ['image/jpeg', 'image/png', 'image/webp']
+      && data.sizeBytes is int && data.sizeBytes > 0 && data.sizeBytes <= 400000
+      && data.createdAt is timestamp;
+    }
+
+    function isValidNotificationItem(data, uid, notificationId) {
+      return data.keys().hasAll([
+        'notificationId', 'uid', 'type', 'title', 'body', 'read', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'notificationId', 'uid', 'type', 'title', 'body', 'relatedId', 'read', 'createdAt', 'updatedAt'
+      ])
+      && data.notificationId == notificationId
+      && isValidId(data.notificationId)
+      && data.uid == uid
+      && isValidId(data.uid)
+      && data.type in [
+        'friend_request', 'friend_accepted', 'badge_unlocked',
+        'leaderboard_milestone', 'segment_threshold', 'report_status', 'confirmed_repair'
+      ]
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 96
+      && data.body is string && data.body.size() >= 1 && data.body.size() <= 240
+      && (!('relatedId' in data) || (data.relatedId is string && data.relatedId.size() <= 128))
+      && data.read is bool
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    // Boot connection check (read-only single-doc probe)
+    match /test/connection {
+      allow get: if true;
+      allow list, write: if false;
+    }
+
+    // Trusted server-managed admin allowlist (no client writes)
+    match /admins/{uid} {
+      allow get: if isOwner(uid);
+      allow list, write: if false;
+    }
+
+    // Immutable admin audit log (admin read-only; server-written only)
+    match /adminAudit/{eventId} {
+      allow get: if isValidId(eventId) && isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // Server-only reverse-geocoding cache (no client access)
+    match /geocodeCache/{coordKey} {
+      allow read, write: if false;
+    }
+
+    // Road-aligned street segments & accepted memberships (server-written only)
+    match /streetSegments/{segmentId} {
+      allow get: if isValidId(segmentId) && (existing().status == 'active' || isAdmin());
+      allow list: if existing().status == 'active';
+      allow create, update, delete: if false;
+
+      match /acceptedPotholes/{potholeId} {
+        allow get: if isValidId(segmentId) && isValidId(potholeId) && (isSignedIn() || isAdmin());
+        allow list: if isSignedIn() && existing().segmentId == segmentId;
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Consolidated 5-distinct-pothole civic report cycles (server-written only)
+    match /reports/{reportId} {
+      allow get: if isValidId(reportId) && (
+        existing().status in ['awaiting_admin_review', 'ready_for_submission', 'submitted', 'acknowledged', 'resolved', 'closed'] ||
+        isAdmin()
+      );
+      allow list: if existing().status in ['awaiting_admin_review', 'ready_for_submission', 'submitted', 'acknowledged', 'resolved', 'closed'];
+      allow create, update, delete: if false;
+
+      match /supplements/{supplementId} {
+        allow get: if isValidId(reportId) && isValidId(supplementId) && (isSignedIn() || isAdmin());
+        allow list: if isSignedIn() && existing().reportId == reportId;
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Canonical distinct Atlanta pothole records (server-written via Admin SDK transactions only)
+    match /potholes/{potholeId} {
+      allow get: if isValidId(potholeId) && (
+        existing().status != 'rejected' ||
+        (isSignedIn() && existing().primaryContributorUid == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if existing().status != 'rejected';
+      allow create, update, delete: if false;
+    }
+
+    // Individual pothole submissions & evidence links (server-written via Admin SDK transactions only)
+    match /submissions/{submissionId} {
+      allow get: if isValidId(submissionId) && (
+        existing().duplicateStatus in ['distinct', 'evidence_added'] ||
+        (isSignedIn() && existing().userId == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if existing().duplicateStatus in ['distinct', 'evidence_added']
+        || (isSignedIn() && existing().userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // Friendships (server-managed via Express API; readable only by the two participants)
+    match /friendships/{friendshipId} {
+      allow get: if isValidId(friendshipId) && isSignedIn() && (
+        request.auth.uid in existing().participantUids || isAdmin()
+      );
+      allow list: if isSignedIn() && request.auth.uid in existing().participantUids;
+      allow create, update, delete: if false;
+    }
+
+    // Server-maintained leaderboard statistics (clients cannot write)
+    match /leaderboardStats/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && (
+        isOwner(uid) || existing().showOnLeaderboard == true || isAdmin()
+      );
+      allow list: if isSignedIn() && existing().showOnLeaderboard == true;
+      allow create, update, delete: if false;
+    }
+
+    // Server-evaluated achievements (owner read; clients cannot write)
+    match /achievements/{uid}/badges/{badgeType} {
+      allow get: if isValidId(uid) && isValidId(badgeType) && (isOwner(uid) || isAdmin());
+      allow list: if isValidId(uid) && isOwner(uid) && existing().uid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    // Per-user in-app notifications (owner read; owner may mark read; server creates)
+    match /notifications/{uid}/items/{notificationId} {
+      allow get: if isValidId(uid) && isValidId(notificationId) && isOwner(uid);
+      allow list: if isValidId(uid) && isOwner(uid) && existing().uid == request.auth.uid;
+      allow create, delete: if false;
+      allow update: if isVerifiedUser()
+        && isValidId(uid)
+        && isValidId(notificationId)
+        && isOwner(uid)
+        && isValidNotificationItem(incoming(), uid, notificationId)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])
+        && incoming().uid == existing().uid
+        && incoming().notificationId == existing().notificationId
+        && incoming().type == existing().type
+        && incoming().title == existing().title
+        && incoming().body == existing().body
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+
+    // Public-safe street-level and achievement activity feed (server-written only)
+    match /activityFeed/{eventId} {
+      allow get: if isValidId(eventId) && existing().visibility == 'public';
+      allow list: if existing().visibility == 'public';
+      allow create, update, delete: if false;
+    }
+
+    // Entertainment minigame personal bests (server-written only; isolated from civic stats)
+    match /gameStats/{statId} {
+      allow get: if statId is string && statId.size() >= 3 && statId.size() <= 160 && statId.matches('^[a-zA-Z0-9_\\-]+$')
+        && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && existing().uid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    // Isolated Spark-tier binary media store (single-doc get only; no list scraping)
+    match /mediaObjects/{mediaId} {
+      allow get: if isValidId(mediaId);
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidId(mediaId)
+        && isValidMediaObject(incoming(), mediaId)
+        && incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isAdmin() || (isVerifiedUser() && existing().ownerId == request.auth.uid);
+    }
+
+    // Public contributor profiles (no PII)
+    match /users/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || existing().showOnLeaderboard == true || isAdmin());
+      allow list: if isSignedIn() && existing().showOnLeaderboard == true;
+
+      allow create: if isVerifiedUser()
+        && isValidId(uid)
+        && isOwner(uid)
+        && isValidUserPublicProfile(incoming(), uid)
+        && incoming().distinctPotholeCount == 0
+        && incoming().evidenceCount == 0
+        && incoming().unlockedBadgesCount == 0
+        && incoming().joinedAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(uid)
+        && isValidUserPublicProfile(incoming(), uid)
+        && (
+          isAdmin() || (
+            isOwner(uid)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'username', 'displayName', 'photoURL', 'homeNeighborhood',
+              'showOnLeaderboard', 'shareNeighborhood', 'updatedAt'
+            ])
+            && incoming().uid == existing().uid
+            && incoming().joinedAt == existing().joinedAt
+            && incoming().distinctPotholeCount == existing().distinctPotholeCount
+            && incoming().evidenceCount == existing().evidenceCount
+            && incoming().unlockedBadgesCount == existing().unlockedBadgesCount
+            && incoming().updatedAt == request.time
+          )
+        );
+
+      allow delete: if false;
+
+      // Private PII subcollection (owner only)
+      match /private/account {
+        allow get: if isValidId(uid) && isOwner(uid);
+        allow list: if false;
+
+        allow create: if isVerifiedUser()
+          && isValidId(uid)
+          && isOwner(uid)
+          && isValidUserPrivateAccount(incoming(), uid)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+
+        allow update: if isVerifiedUser()
+          && isValidId(uid)
+          && isOwner(uid)
+          && isValidUserPrivateAccount(incoming(), uid)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['notificationsEnabled', 'updatedAt'])
+          && incoming().uid == existing().uid
+          && incoming().email == existing().email
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time;
+
+        allow delete: if false;
+      }
+
+      // Phase 1 media reference verification metadata (zero image bytes)
+      match /storageChecks/{checkId} {
+        allow get: if isValidId(uid) && isValidId(checkId) && isOwner(uid);
+        allow list: if isValidId(uid) && isOwner(uid) && existing().userId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(uid)
+          && isValidId(checkId)
+          && isOwner(uid)
+          && isValidStorageVerificationRecord(incoming(), uid, checkId)
+          && incoming().createdAt == request.time;
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

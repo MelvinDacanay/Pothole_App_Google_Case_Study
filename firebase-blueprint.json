@@ -1,0 +1,875 @@
+{
+  "entities": {
+    "UserPublicProfile": {
+      "title": "UserPublicProfile",
+      "description": "Publicly visible contributor profile with zero private PII or personal location history.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "homeNeighborhood": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "distinctPotholeCount": {
+          "type": "integer"
+        },
+        "evidenceCount": {
+          "type": "integer"
+        },
+        "unlockedBadgesCount": {
+          "type": "integer"
+        },
+        "showOnLeaderboard": {
+          "type": "boolean"
+        },
+        "shareNeighborhood": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "uid",
+        "username",
+        "displayName",
+        "joinedAt",
+        "updatedAt",
+        "distinctPotholeCount",
+        "evidenceCount",
+        "unlockedBadgesCount",
+        "showOnLeaderboard",
+        "shareNeighborhood"
+      ]
+    },
+    "UserPrivateAccount": {
+      "title": "UserPrivateAccount",
+      "description": "Strictly private account metadata isolated from public profiles.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "notificationsEnabled": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "notificationsEnabled", "createdAt", "updatedAt"]
+    },
+    "MediaObject": {
+      "title": "MediaObject",
+      "description": "Isolated compressed image binary (Firestore Bytes <= 400KB) kept separate from pothole, submission, and user documents.",
+      "type": "object",
+      "properties": {
+        "mediaId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": ["image/jpeg", "image/png", "image/webp"]
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string",
+          "format": "byte"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["mediaId", "ownerId", "contentType", "sizeBytes", "width", "height", "data", "createdAt"]
+    },
+    "StorageVerificationRecord": {
+      "title": "StorageVerificationRecord",
+      "description": "Lightweight metadata reference pointing to /api/media/{mediaId} (zero image bytes in user/pothole documents).",
+      "type": "object",
+      "properties": {
+        "checkId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "storagePath": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 256
+        },
+        "downloadUrl": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 1024
+        },
+        "contentType": {
+          "type": "string",
+          "enum": ["image/jpeg", "image/png", "image/webp"]
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "checkId",
+        "userId",
+        "storagePath",
+        "downloadUrl",
+        "contentType",
+        "sizeBytes",
+        "createdAt"
+      ]
+    },
+    "PotholeRecord": {
+      "title": "PotholeRecord",
+      "description": "Canonical distinct pothole record created and updated strictly by trusted server-side transactions.",
+      "type": "object",
+      "properties": {
+        "potholeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "coordinateSource": {
+          "type": "string",
+          "enum": ["gps_verified", "exif_extracted", "manual_pin"]
+        },
+        "accuracyMeters": { "type": "number" },
+        "formattedAddress": { "type": "string", "maxLength": 256 },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "normalizedStreet": { "type": "string", "maxLength": 128 },
+        "neighborhood": { "type": "string", "maxLength": 128 },
+        "city": { "type": "string", "maxLength": 64 },
+        "state": { "type": "string", "maxLength": 32 },
+        "postalCode": { "type": "string", "maxLength": 20 },
+        "placeId": { "type": "string", "maxLength": 128 },
+        "jurisdiction": {
+          "type": "string",
+          "enum": ["atldot", "gdot", "unknown"]
+        },
+        "segmentId": { "type": "string", "maxLength": 128 },
+        "segmentConfidence": {
+          "type": "string",
+          "enum": ["verified", "provisional", "needs_review"]
+        },
+        "locationUserCorrected": { "type": "boolean" },
+        "status": {
+          "type": "string",
+          "enum": ["accepted", "provisional", "reported", "acknowledged", "repaired", "rejected"]
+        },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["accepted", "provisional", "needs_review", "rejected"]
+        },
+        "severityLabel": {
+          "type": "string",
+          "enum": ["low", "moderate", "severe", "unclassified"]
+        },
+        "primaryContributorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "primaryContributorUsername": { "type": "string", "maxLength": 32 },
+        "primaryContributorDisplayName": { "type": "string", "maxLength": 64 },
+        "primaryPhotoUrl": { "type": "string", "maxLength": 512 },
+        "primaryMediaId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "evidenceCount": { "type": "integer" },
+        "submissionCount": { "type": "integer" },
+        "aiReviewSummary": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "potholeId",
+        "lat",
+        "lng",
+        "coordinateSource",
+        "formattedAddress",
+        "streetName",
+        "normalizedStreet",
+        "city",
+        "state",
+        "jurisdiction",
+        "locationUserCorrected",
+        "status",
+        "verificationStatus",
+        "severityLabel",
+        "primaryContributorUid",
+        "primaryContributorUsername",
+        "primaryContributorDisplayName",
+        "primaryPhotoUrl",
+        "primaryMediaId",
+        "evidenceCount",
+        "submissionCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PotholeSubmission": {
+      "title": "PotholeSubmission",
+      "description": "Individual contributor photo/evidence submission linked to a canonical or provisional pothole.",
+      "type": "object",
+      "properties": {
+        "submissionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": { "type": "string", "maxLength": 32 },
+        "displayName": { "type": "string", "maxLength": 64 },
+        "potholeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actionType": {
+          "type": "string",
+          "enum": ["new_pothole", "add_evidence", "provisional_review"]
+        },
+        "duplicateStatus": {
+          "type": "string",
+          "enum": ["distinct", "evidence_added", "pending_review", "merged", "rejected"]
+        },
+        "duplicateConfidence": { "type": "number" },
+        "mediaId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "photoUrl": { "type": "string", "maxLength": 512 },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "coordinateSource": {
+          "type": "string",
+          "enum": ["gps_verified", "exif_extracted", "manual_pin"]
+        },
+        "accuracyMeters": { "type": "number" },
+        "formattedAddress": { "type": "string", "maxLength": 256 },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "normalizedStreet": { "type": "string", "maxLength": 128 },
+        "locationUserCorrected": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 400 },
+        "aiClassificationStatus": {
+          "type": "string",
+          "enum": ["completed", "unavailable", "skipped"]
+        },
+        "aiIsRoadDefect": { "type": "boolean" },
+        "aiSeverityLabel": {
+          "type": "string",
+          "enum": ["low", "moderate", "severe", "unclassified"]
+        },
+        "aiSummary": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "submissionId",
+        "userId",
+        "username",
+        "displayName",
+        "potholeId",
+        "actionType",
+        "duplicateStatus",
+        "duplicateConfidence",
+        "mediaId",
+        "photoUrl",
+        "lat",
+        "lng",
+        "coordinateSource",
+        "formattedAddress",
+        "streetName",
+        "normalizedStreet",
+        "locationUserCorrected",
+        "aiClassificationStatus",
+        "aiSeverityLabel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GeocodeCacheRecord": {
+      "title": "GeocodeCacheRecord",
+      "description": "Server-only 30-day bounded reverse geocoding cache to avoid redundant Geocoding API calls.",
+      "type": "object",
+      "properties": {
+        "coordKey": { "type": "string", "maxLength": 64 },
+        "formattedAddress": { "type": "string", "maxLength": 256 },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "normalizedStreet": { "type": "string", "maxLength": 128 },
+        "city": { "type": "string", "maxLength": 64 },
+        "state": { "type": "string", "maxLength": 32 },
+        "jurisdiction": { "type": "string", "enum": ["atldot", "gdot", "unknown"] },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["coordKey", "formattedAddress", "streetName", "normalizedStreet", "city", "state", "jurisdiction", "expiresAt"]
+    },
+    "FriendshipRecord": {
+      "title": "FriendshipRecord",
+      "description": "Server-managed two-party friendship state between contributors.",
+      "type": "object",
+      "properties": {
+        "friendshipId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "requesterUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "recipientUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "participantUids": {
+          "type": "array"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["friendshipId", "requesterUid", "recipientUid", "participantUids", "status", "createdAt", "updatedAt"]
+    },
+    "LeaderboardStat": {
+      "title": "LeaderboardStat",
+      "description": "Server-maintained leaderboard aggregates segmented by overall, weekly, monthly, and opted-in neighborhood.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": { "type": "string", "maxLength": 32 },
+        "displayName": { "type": "string", "maxLength": 64 },
+        "photoURL": { "type": "string", "maxLength": 512 },
+        "showOnLeaderboard": { "type": "boolean" },
+        "shareNeighborhood": { "type": "boolean" },
+        "neighborhood": { "type": "string", "maxLength": 64 },
+        "overallDistinctCount": { "type": "integer" },
+        "overallEvidenceCount": { "type": "integer" },
+        "weeklyDistinctCount": { "type": "integer" },
+        "weeklyEvidenceCount": { "type": "integer" },
+        "weekKey": { "type": "string", "maxLength": 16 },
+        "monthlyDistinctCount": { "type": "integer" },
+        "monthlyEvidenceCount": { "type": "integer" },
+        "monthKey": { "type": "string", "maxLength": 16 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "username",
+        "displayName",
+        "showOnLeaderboard",
+        "shareNeighborhood",
+        "overallDistinctCount",
+        "overallEvidenceCount",
+        "weeklyDistinctCount",
+        "weeklyEvidenceCount",
+        "weekKey",
+        "monthlyDistinctCount",
+        "monthlyEvidenceCount",
+        "monthKey",
+        "updatedAt"
+      ]
+    },
+    "AchievementBadge": {
+      "title": "AchievementBadge",
+      "description": "Server-evaluated civic achievement badge progress and unlock status.",
+      "type": "object",
+      "properties": {
+        "badgeType": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": { "type": "string", "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 160 },
+        "progress": { "type": "integer" },
+        "target": { "type": "integer" },
+        "unlocked": { "type": "boolean" },
+        "unlockedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["badgeType", "uid", "title", "description", "progress", "target", "unlocked", "updatedAt"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "Per-user in-app notification with zero private address or tracking exposure.",
+      "type": "object",
+      "properties": {
+        "notificationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "friend_request",
+            "friend_accepted",
+            "badge_unlocked",
+            "leaderboard_milestone",
+            "segment_threshold",
+            "report_status",
+            "confirmed_repair"
+          ]
+        },
+        "title": { "type": "string", "maxLength": 96 },
+        "body": { "type": "string", "maxLength": 240 },
+        "relatedId": { "type": "string", "maxLength": 128 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["notificationId", "uid", "type", "title", "body", "read", "createdAt", "updatedAt"]
+    },
+    "ActivityFeedEvent": {
+      "title": "ActivityFeedEvent",
+      "description": "Public-safe street-level and achievement activity feed event without PII or personal tracking histories.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorUsername": { "type": "string", "maxLength": 32 },
+        "actorDisplayName": { "type": "string", "maxLength": 64 },
+        "eventType": {
+          "type": "string",
+          "enum": ["new_pothole", "evidence_added", "badge_unlocked", "confirmed_repair"]
+        },
+        "summary": { "type": "string", "maxLength": 200 },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "neighborhood": { "type": "string", "maxLength": 64 },
+        "potholeId": { "type": "string", "maxLength": 128 },
+        "visibility": { "type": "string", "enum": ["public"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "actorUid", "actorUsername", "actorDisplayName", "eventType", "summary", "visibility", "createdAt"]
+    },
+    "StreetSegmentRecord": {
+      "title": "StreetSegmentRecord",
+      "description": "Road-aligned Atlanta street corridor segment with confidence classification and 5-pothole cycle counters (server-written only).",
+      "type": "object",
+      "properties": {
+        "segmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "normalizedStreet": { "type": "string", "maxLength": 128 },
+        "corridorLabel": { "type": "string", "maxLength": 160 },
+        "city": { "type": "string", "maxLength": 64 },
+        "state": { "type": "string", "maxLength": 32 },
+        "neighborhood": { "type": "string", "maxLength": 64 },
+        "jurisdiction": { "type": "string", "enum": ["atldot", "gdot", "unknown"] },
+        "confidence": { "type": "string", "enum": ["verified", "provisional", "needs_review"] },
+        "anchorLat": { "type": "number" },
+        "anchorLng": { "type": "number" },
+        "minLat": { "type": "number" },
+        "maxLat": { "type": "number" },
+        "minLng": { "type": "number" },
+        "maxLng": { "type": "number" },
+        "minBlock": { "type": "integer" },
+        "maxBlock": { "type": "integer" },
+        "distinctAcceptedCount": { "type": "integer" },
+        "currentCycleNumber": { "type": "integer" },
+        "currentCycleDistinctCount": { "type": "integer" },
+        "activeReportId": { "type": "string", "maxLength": 128 },
+        "lastCutoffAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "merged"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "segmentId",
+        "streetName",
+        "normalizedStreet",
+        "corridorLabel",
+        "city",
+        "state",
+        "jurisdiction",
+        "confidence",
+        "anchorLat",
+        "anchorLng",
+        "distinctAcceptedCount",
+        "currentCycleNumber",
+        "currentCycleDistinctCount",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SegmentAcceptedPothole": {
+      "title": "SegmentAcceptedPothole",
+      "description": "Idempotent accepted-pothole membership link under a street segment.",
+      "type": "object",
+      "properties": {
+        "potholeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "segmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "cycleNumber": { "type": "integer" },
+        "countedForThreshold": { "type": "boolean" },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["potholeId", "segmentId", "cycleNumber", "countedForThreshold", "streetName", "lat", "lng", "addedAt"]
+    },
+    "CivicReportRecord": {
+      "title": "CivicReportRecord",
+      "description": "Consolidated 5-distinct-pothole report packet for administrative review and honest external reporting.",
+      "type": "object",
+      "properties": {
+        "reportId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "segmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "cycleNumber": { "type": "integer" },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "corridorLabel": { "type": "string", "maxLength": 160 },
+        "jurisdiction": { "type": "string", "enum": ["atldot", "gdot", "unknown"] },
+        "status": {
+          "type": "string",
+          "enum": [
+            "awaiting_admin_review",
+            "ready_for_submission",
+            "submitted",
+            "acknowledged",
+            "resolved",
+            "unable_to_submit",
+            "closed"
+          ]
+        },
+        "distinctPotholeCount": { "type": "integer" },
+        "supplementCount": { "type": "integer" },
+        "snapshotPotholeIds": { "type": "array" },
+        "centerLat": { "type": "number" },
+        "centerLng": { "type": "number" },
+        "addressRange": { "type": "string", "maxLength": 200 },
+        "externalReference": { "type": "string", "maxLength": 128 },
+        "submissionChannel": { "type": "string", "maxLength": 128 },
+        "submittedByUid": { "type": "string", "maxLength": 128 },
+        "adminReviewNotes": { "type": "string", "maxLength": 500 },
+        "googleSheetUrl": { "type": "string", "maxLength": 512 },
+        "evidenceMateriallyChanged": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "cutoffAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "reportId",
+        "segmentId",
+        "cycleNumber",
+        "streetName",
+        "corridorLabel",
+        "jurisdiction",
+        "status",
+        "distinctPotholeCount",
+        "supplementCount",
+        "snapshotPotholeIds",
+        "centerLat",
+        "centerLng",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ReportSupplementRecord": {
+      "title": "ReportSupplementRecord",
+      "description": "Supplemental distinct pothole attached to an already active report cycle.",
+      "type": "object",
+      "properties": {
+        "supplementId": { "type": "string", "maxLength": 128 },
+        "reportId": { "type": "string", "maxLength": 128 },
+        "potholeId": { "type": "string", "maxLength": 128 },
+        "streetName": { "type": "string", "maxLength": 128 },
+        "formattedAddress": { "type": "string", "maxLength": 256 },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["supplementId", "reportId", "potholeId", "streetName", "formattedAddress", "addedAt"]
+    },
+    "AdminAuditEvent": {
+      "title": "AdminAuditEvent",
+      "description": "Immutable administrative audit log entry (server-written only).",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 254 },
+        "action": { "type": "string", "maxLength": 96 },
+        "targetType": { "type": "string", "maxLength": 48 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 400 },
+        "beforeSummary": { "type": "string", "maxLength": 300 },
+        "afterSummary": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "actorUid", "action", "targetType", "targetId", "reason", "createdAt"]
+    },
+    "GameStatRecord": {
+      "title": "GameStatRecord",
+      "description": "Server-validated entertainment minigame personal best and run counter strictly isolated from civic counts and leaderboards.",
+      "type": "object",
+      "properties": {
+        "statId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "gameId": {
+          "type": "string",
+          "enum": ["pothole_repair", "pothole_runner"]
+        },
+        "highScore": { "type": "integer" },
+        "lastScore": { "type": "integer" },
+        "gamesPlayed": { "type": "integer" },
+        "bestDurationMs": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "statId",
+        "uid",
+        "gameId",
+        "highScore",
+        "lastScore",
+        "gamesPlayed",
+        "bestDurationMs",
+        "updatedAt"
+      ]
+    },
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "Read-only health probe document for verifying client connectivity to Firestore.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "required": ["status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserPublicProfile" },
+      "description": "Public contributor profile."
+    },
+    "/users/{uid}/private/account": {
+      "schema": { "$ref": "#/entities/UserPrivateAccount" },
+      "description": "Private PII and notification preferences isolated to owner."
+    },
+    "/users/{uid}/storageChecks/{checkId}": {
+      "schema": { "$ref": "#/entities/StorageVerificationRecord" },
+      "description": "Phase 1 media reference metadata checks."
+    },
+    "/mediaObjects/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaObject" },
+      "description": "Spark-tier free isolated binary media store served via /api/media/{mediaId}."
+    },
+    "/potholes/{potholeId}": {
+      "schema": { "$ref": "#/entities/PotholeRecord" },
+      "description": "Canonical distinct Atlanta pothole records (server-written only)."
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/PotholeSubmission" },
+      "description": "Individual contributor pothole photo/evidence submissions (server-written only)."
+    },
+    "/geocodeCache/{coordKey}": {
+      "schema": { "$ref": "#/entities/GeocodeCacheRecord" },
+      "description": "Server-only reverse geocoding cache."
+    },
+    "/friendships/{friendshipId}": {
+      "schema": { "$ref": "#/entities/FriendshipRecord" },
+      "description": "Server-managed friend requests and accepted friendships."
+    },
+    "/leaderboardStats/{uid}": {
+      "schema": { "$ref": "#/entities/LeaderboardStat" },
+      "description": "Server-maintained overall, weekly, monthly, and opted-in neighborhood leaderboard stats."
+    },
+    "/achievements/{uid}/badges/{badgeType}": {
+      "schema": { "$ref": "#/entities/AchievementBadge" },
+      "description": "Server-evaluated contributor achievements."
+    },
+    "/notifications/{uid}/items/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "Per-user in-app notifications."
+    },
+    "/activityFeed/{eventId}": {
+      "schema": { "$ref": "#/entities/ActivityFeedEvent" },
+      "description": "Public-safe street-level and achievement activity events."
+    },
+    "/streetSegments/{segmentId}": {
+      "schema": { "$ref": "#/entities/StreetSegmentRecord" },
+      "description": "Road-aligned street corridor segments (server-written only)."
+    },
+    "/streetSegments/{segmentId}/acceptedPotholes/{potholeId}": {
+      "schema": { "$ref": "#/entities/SegmentAcceptedPothole" },
+      "description": "Idempotent accepted pothole membership per segment (server-written only)."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/CivicReportRecord" },
+      "description": "Consolidated 5-pothole civic report cycles (server-written only)."
+    },
+    "/reports/{reportId}/supplements/{supplementId}": {
+      "schema": { "$ref": "#/entities/ReportSupplementRecord" },
+      "description": "Additional potholes attached to active report cycles (server-written only)."
+    },
+    "/adminAudit/{eventId}": {
+      "schema": { "$ref": "#/entities/AdminAuditEvent" },
+      "description": "Immutable server-written administrative audit log."
+    },
+    "/gameStats/{statId}": {
+      "schema": { "$ref": "#/entities/GameStatRecord" },
+      "description": "Server-validated entertainment minigame high scores strictly isolated from civic metrics."
+    },
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/TestConnection" },
+      "description": "Boot connectivity check document."
+    }
+  }
+}
