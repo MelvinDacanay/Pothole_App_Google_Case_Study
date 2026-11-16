@@ -1,12 +1,12 @@
 {
   "projectId": "patchup-fff96",
   "appId": "1:884267611225:web:72383e3d163038845b2d48",
-  "apiKey": "AIzaSyDfkhdQg7YYBDai_48Kz-nJ53qreZ0v0_8",
+  "apiKey": "",
   "authDomain": "patchup-fff96.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-bca41787-ae3f-4dc1-a851-4fcb17cec913",
+  "firestoreDatabaseId": "",
   "storageBucket": "patchup-fff96.firebasestorage.app",
-  "messagingSenderId": "884267611225",
+  "messagingSenderId": "",
   "measurementId": "",
-  "oAuthClientId": "884267611225-ms91kkpmrnvsvs6niqtqreqrbnlfg800.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }
