@@ -111,7 +111,7 @@ export const MapView: React.FC<MapViewProps> = ({
   return (
     <div className="space-y-5">
       {/* Map Header & Filters */}
-      <div className="bg-white rounded-2xl border border-[#E8DFC5] p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="min-w-0 bg-white rounded-2xl border border-[#E8DFC5] p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-[#2D2B35]">
             Atlanta Pothole Map
@@ -123,14 +123,14 @@ export const MapView: React.FC<MapViewProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-1 p-1 bg-[#F7F7F8] border border-[#E8DFC5] rounded-xl">
+        <div className="min-w-0 flex flex-wrap items-center gap-2">
+          <div className="scrollbar-none w-full sm:w-auto inline-flex items-center gap-1 p-1 bg-[#F7F7F8] border border-[#E8DFC5] rounded-xl overflow-x-auto">
             {(['all', 'accepted', 'provisional', 'repaired'] as const).map((filterKey) => (
               <button
                 key={filterKey}
                 type="button"
                 onClick={() => setStatusFilter(filterKey)}
-                className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+                className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 ${
                   statusFilter === filterKey
                     ? 'bg-white text-[#2D2B35] shadow-xs'
                     : 'text-[#6E6978] hover:text-[#2D2B35]'
@@ -155,7 +155,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   setOnlyMine((v) => !v);
                   setOnlyFriends(false);
                 }}
-                className={`min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition whitespace-nowrap ${
+                className={`flex-1 sm:flex-none min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition whitespace-nowrap ${
                   onlyMine
                     ? 'bg-[#2D2B35] border-[#2D2B35] text-white'
                     : 'bg-[#F7F7F8] border-[#E8DFC5] text-[#2D2B35] hover:bg-[#E8DFC5]/40'
@@ -169,7 +169,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   setOnlyFriends((v) => !v);
                   setOnlyMine(false);
                 }}
-                className={`min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition whitespace-nowrap ${
+                className={`flex-1 sm:flex-none min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition whitespace-nowrap ${
                   onlyFriends
                     ? 'bg-[#2D2B35] border-[#2D2B35] text-white'
                     : 'bg-[#F7F7F8] border-[#E8DFC5] text-[#2D2B35] hover:bg-[#E8DFC5]/40'
@@ -183,7 +183,7 @@ export const MapView: React.FC<MapViewProps> = ({
           <button
             type="button"
             onClick={onOpenCivic}
-            className="inline-flex items-center gap-2 min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/40 text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/40 text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
           >
             <FileText className="w-4 h-4 text-[#4CB729]" />
             <span>Corridors</span>
@@ -192,7 +192,7 @@ export const MapView: React.FC<MapViewProps> = ({
           <button
             type="button"
             onClick={onStartCapture}
-            className="inline-flex items-center gap-2 min-h-[44px] px-4 py-2 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-xs font-semibold transition whitespace-nowrap"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-xs font-semibold transition whitespace-nowrap"
           >
             <Camera className="w-4 h-4" />
             <span>Capture Here</span>

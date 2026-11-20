@@ -449,7 +449,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCivic, onOpenGam
                   <span className="text-xs font-semibold text-[#4B4646]">
                     Private Account Record (Owner-Only Subcollection)
                   </span>
-                  <span className="text-xs font-mono text-[#6E6978]">{privateAccount.email}</span>
+                  <span className="max-w-full break-all text-xs font-mono text-[#6E6978]">
+                    {privateAccount.email}
+                  </span>
                 </div>
                 <label className="flex items-center justify-between gap-3 cursor-pointer min-h-[44px]">
                   <span className="text-sm text-[#3A3535]">In-App Notifications Enabled</span>
@@ -516,7 +518,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCivic, onOpenGam
             <Users className="w-5 h-5 text-[#4CB729] shrink-0" />
           </div>
 
-          <form onSubmit={(e) => void handleFriendSearch(e)} className="flex gap-2">
+          <form
+            onSubmit={(e) => void handleFriendSearch(e)}
+            className="flex flex-col min-[380px]:flex-row gap-2"
+          >
             <input
               type="text"
               value={searchQuery}
@@ -527,7 +532,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCivic, onOpenGam
             <button
               type="submit"
               disabled={searching}
-              className="min-h-[44px] px-4 py-2 rounded-xl bg-[#2D2B35] hover:bg-[#3A3535] text-white text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              className="min-h-[44px] px-4 py-2 rounded-xl bg-[#2D2B35] hover:bg-[#3A3535] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <Search className="w-4 h-4" />
               <span>{searching ? 'Searching...' : 'Search'}</span>

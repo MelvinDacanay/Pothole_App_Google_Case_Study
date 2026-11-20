@@ -28,8 +28,8 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
       <OfflineBanner />
 
       {/* Desktop Top Bar (3-zone contract) */}
-      <header className="hidden md:block sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-[#E8DFC5]">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-8">
+      <header className="hidden lg:block sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-[#E8DFC5]">
+        <div className="max-w-7xl mx-auto px-5 xl:px-6 h-16 flex items-center justify-between gap-4 xl:gap-8">
           {/* Zone 1: Single-line Brand Wordmark */}
           <button
             type="button"
@@ -48,7 +48,7 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
           </button>
 
           {/* Zone 2: 5 concise single-line navigation links */}
-          <nav className="flex items-center gap-6" aria-label="Primary">
+          <nav className="flex items-center gap-3 xl:gap-6" aria-label="Primary">
             {NAV_ITEMS.map((item) => {
               const isActive = activeTab === item.id;
               const isCapture = item.id === 'capture';
@@ -103,8 +103,8 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
       </header>
 
       {/* Mobile Compact Header (<= 48px to obey 15% aggregate sticky cap) */}
-      <header className="md:hidden sticky top-0 z-30 pt-safe bg-white/95 backdrop-blur-md border-b border-[#E8DFC5]">
-        <div className="px-4 h-12 flex items-center justify-between gap-3">
+      <header className="lg:hidden sticky top-0 z-30 pt-safe bg-white/95 backdrop-blur-md border-b border-[#E8DFC5]">
+        <div className="px-3 min-[380px]:px-4 h-12 flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => onSelectTab('home')}
@@ -139,7 +139,9 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
                   {(publicProfile?.displayName || user.email || 'P').slice(0, 1).toUpperCase()}
                 </span>
               )}
-              <span className="max-w-[110px] truncate">@{publicProfile?.username || 'profile'}</span>
+              <span className="hidden min-[360px]:inline max-w-[110px] truncate">
+                @{publicProfile?.username || 'profile'}
+              </span>
             </button>
           ) : (
             <button
@@ -155,14 +157,14 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
       </header>
 
       {/* Main Content Workspace */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-8 pb-24 md:pb-10">
+      <main className="flex-1 min-w-0 w-full max-w-7xl mx-auto px-3 min-[380px]:px-4 sm:px-6 py-4 sm:py-8 pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-10">
         {children}
       </main>
 
       {/* Mobile Fixed 5-Tab Bottom Navigation Bar */}
       <nav
         aria-label="Mobile navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E8DFC5] pb-safe"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E8DFC5] pb-safe px-safe"
       >
         <div className="grid grid-cols-5 items-center h-16 px-1">
           {NAV_ITEMS.map((item) => {
