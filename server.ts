@@ -99,11 +99,17 @@ if (firebaseConfig) {
         projectId: firebaseConfig.projectId,
       });
       adminSdkMode = 'service_account';
-    } else {
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       adminApp = initializeApp({
         projectId: firebaseConfig.projectId,
       });
       adminSdkMode = 'adc_or_project';
+    } else {
+      console.warn(
+        'PatchUp: Firebase Admin SDK skipped for local dev (set FIREBASE_SERVICE_ACCOUNT_JSON in .env or run gcloud auth application-default login). Frontend will still load; /api routes needing Firestore return 503.'
+      );
+      adminApp = null;
+      adminSdkMode = 'unconfigured';
     }
   } catch (err) {
     console.warn('Firebase Admin SDK initialization deferred:', err);
@@ -129,8 +135,12 @@ async function probeAdminFirestore() {
   try {
     await serverDb.collection('test').doc('connection').get();
     adminFirestoreReady = true;
-  } catch {
+  } catch (err) {
     adminFirestoreReady = false;
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('default credentials') || message.includes('NO_ADC_FOUND')) {
+      console.warn('PatchUp: Firestore probe skipped — no Google Application Default Credentials.');
+    }
   }
 }
 

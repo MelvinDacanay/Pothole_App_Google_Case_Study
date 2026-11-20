@@ -13,6 +13,7 @@ import {
   auth,
   clearSheetsAccessToken,
   db,
+  firebaseClientConfigured,
   handleFirestoreError,
   OperationType,
   signInWithGoogle,
@@ -97,10 +98,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isSigningIn, setIsSigningIn] = useState(false);
 
   useEffect(() => {
+    if (!firebaseClientConfigured || !auth) {
+      setFirestoreStatus({
+        ok: false,
+        message:
+          'Firebase web config missing (apiKey/appId). UI preview works; sign-in and live data need firebase-applet-config.json or VITE_FIREBASE_* in .env.',
+      });
+      setAuthReady(true);
+      return;
+    }
     testFirestoreConnection().then(setFirestoreStatus);
   }, []);
 
   useEffect(() => {
+    if (!auth || !db) {
+      setAuthReady(true);
+      return;
+    }
+
+    const firestore = db;
+
     let unsubPublic: (() => void) | null = null;
     let unsubPrivate: (() => void) | null = null;
 
@@ -151,8 +168,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const publicPath = `users/${nextUser.uid}`;
       const privatePath = `users/${nextUser.uid}/private/account`;
-      const publicRef = doc(db, 'users', nextUser.uid);
-      const privateRef = doc(db, 'users', nextUser.uid, 'private', 'account');
+      const publicRef = doc(firestore, 'users', nextUser.uid);
+      const privateRef = doc(firestore, 'users', nextUser.uid, 'private', 'account');
 
       try {
         const [pubSnap, privSnap] = await Promise.all([
@@ -163,7 +180,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ]);
 
         if (!pubSnap.exists() || !privSnap.exists()) {
-          const batch = writeBatch(db);
+          const batch = writeBatch(firestore);
           if (!pubSnap.exists()) {
             const safePhoto =
               nextUser.photoURL && nextUser.photoURL.length <= 512 ? nextUser.photoURL : undefined;
@@ -269,6 +286,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     shareNeighborhood?: boolean;
   }) => {
     if (!user) throw new Error('Sign in required.');
+    if (!db) throw new Error('Firebase is not configured.');
     const path = `users/${user.uid}`;
     const payload: Record<string, unknown> = {
       updatedAt: serverTimestamp(),
@@ -321,6 +339,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateNotificationsPref = async (enabled: boolean) => {
     if (!user) throw new Error('Sign in required.');
+    if (!db) throw new Error('Firebase is not configured.');
     const path = `users/${user.uid}/private/account`;
     try {
       await updateDoc(doc(db, 'users', user.uid, 'private', 'account'), {

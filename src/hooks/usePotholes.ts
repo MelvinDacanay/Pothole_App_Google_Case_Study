@@ -9,6 +9,13 @@ export function useCommunityPotholes() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!db) {
+      setLoading(false);
+      setPotholes([]);
+      setError(null);
+      return;
+    }
+
     const q = query(
       collection(db, 'potholes'),
       where('status', '!=', 'rejected'),
@@ -47,7 +54,7 @@ export function useMySubmissions(uid: string | null) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!uid) {
+    if (!uid || !db) {
       setSubmissions([]);
       setLoading(false);
       return;

@@ -103,7 +103,7 @@ export function useFriends(user: User | null) {
   }, [user]);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !db) {
       setFriends([]);
       setLoading(false);
       return;
@@ -203,7 +203,7 @@ export function useNotifications(user: User | null) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !db) {
       setNotifications([]);
       setLoading(false);
       return;
@@ -240,7 +240,7 @@ export function useNotifications(user: User | null) {
   }, [user]);
 
   const markRead = async (notificationId: string) => {
-    if (!user) return;
+    if (!user || !db) return;
     const docPath = `notifications/${user.uid}/items/${notificationId}`;
     try {
       await updateDoc(doc(db, 'notifications', user.uid, 'items', notificationId), {
@@ -275,6 +275,12 @@ export function useActivityFeed() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!db) {
+      setLoading(false);
+      setEvents([]);
+      return;
+    }
+
     const q = query(
       collection(db, 'activityFeed'),
       where('visibility', '==', 'public'),
@@ -311,7 +317,7 @@ export function useAchievements(user: User | null) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !db) {
       setBadges([]);
       setLoading(false);
       return;
