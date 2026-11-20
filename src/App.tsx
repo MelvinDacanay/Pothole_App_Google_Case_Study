@@ -9,6 +9,7 @@ import { LeaderboardView } from './views/LeaderboardView';
 import { ProfileView } from './views/ProfileView';
 import { CivicReportsView } from './views/CivicReportsView';
 import { MinigamesView } from './views/MinigamesView';
+import { firebaseClientConfigured } from './lib/firebase';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -93,6 +94,15 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <AuthProvider>
+        {!firebaseClientConfigured && (
+          <div className="bg-sky-50 border-b border-sky-200 text-sky-950 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50">
+            Local preview mode: add Firebase web <code className="font-mono">apiKey</code> and{' '}
+            <code className="font-mono">appId</code> to{' '}
+            <code className="font-mono">firebase-applet-config.json</code> (or{' '}
+            <code className="font-mono">VITE_FIREBASE_*</code> in <code className="font-mono">.env</code>)
+            to enable sign-in and live data.
+          </div>
+        )}
         {mapsQuotaExceeded && (
           <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
             <span>

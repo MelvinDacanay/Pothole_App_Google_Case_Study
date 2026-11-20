@@ -204,7 +204,7 @@ export const AtlantaMap: React.FC<AtlantaMapProps> = ({
 
   if (!mapsConfig.configured || !mapsConfig.apiKey) {
     return (
-      <div className="h-[52dvh] min-h-[360px] rounded-2xl bg-[#F7F7F8] border border-[#E8DFC5] p-6 flex flex-col items-center justify-center text-center space-y-3">
+      <div className="h-[48dvh] min-h-[300px] sm:h-[52dvh] sm:min-h-[360px] rounded-2xl bg-[#F7F7F8] border border-[#E8DFC5] p-4 sm:p-6 flex flex-col items-center justify-center text-center space-y-3">
         <AlertTriangle className="w-8 h-8 text-[#D97706]" />
         <h3 className="font-display text-lg font-bold text-[#2D2B35]">
           Google Maps Platform Key Pending
@@ -219,7 +219,7 @@ export const AtlantaMap: React.FC<AtlantaMapProps> = ({
 
   return (
     <div className="relative rounded-2xl overflow-hidden border border-[#E8DFC5] bg-[#F7F7F8]">
-      <div className="h-[56dvh] min-h-[380px] lg:h-[600px] w-full">
+      <div className="h-[50dvh] min-h-[320px] sm:h-[56dvh] sm:min-h-[380px] lg:h-[600px] w-full">
         <APIProvider apiKey={mapsConfig.apiKey} language="en" region="US" libraries={['marker']}>
           <GoogleMap
             mapId={mapsConfig.mapId || 'DEMO_MAP_ID'}
@@ -249,7 +249,7 @@ export const AtlantaMap: React.FC<AtlantaMapProps> = ({
           type="button"
           onClick={handleLocateMe}
           disabled={locating}
-          className="inline-flex items-center gap-2 min-h-[44px] px-3.5 py-2 rounded-xl bg-white/95 hover:bg-white border border-[#E8DFC5] shadow-sm text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
+          className="inline-flex items-center gap-2 min-h-[44px] px-3 sm:px-3.5 py-2 rounded-xl bg-white/95 hover:bg-white border border-[#E8DFC5] shadow-sm text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
         >
           <Crosshair className="w-4 h-4 text-[#4CB729]" />
           <span>{locating ? 'Locating...' : 'Center Near Me'}</span>

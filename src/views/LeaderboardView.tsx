@@ -103,8 +103,8 @@ export const LeaderboardView: React.FC = () => {
           </div>
         ) : (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-[#F7F7F8] border border-[#E8DFC5] rounded-xl">
+            <div className="min-w-0 flex flex-wrap items-center justify-between gap-3">
+              <div className="scrollbar-none w-full sm:w-auto inline-flex items-center gap-1 p-1 bg-[#F7F7F8] border border-[#E8DFC5] rounded-xl overflow-x-auto">
                 {(
                   [
                     { id: 'overall', label: 'Overall' },
@@ -117,7 +117,7 @@ export const LeaderboardView: React.FC = () => {
                     key={tab.id}
                     type="button"
                     onClick={() => setPeriod(tab.id)}
-                    className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+                    className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 ${
                       period === tab.id
                         ? 'bg-white text-[#2D2B35] shadow-xs'
                         : 'text-[#6E6978] hover:text-[#2D2B35]'
@@ -141,7 +141,7 @@ export const LeaderboardView: React.FC = () => {
                   aria-label="Filter by neighborhood"
                   value={selectedNeighborhood}
                   onChange={(e) => setSelectedNeighborhood(e.target.value)}
-                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-xs font-semibold text-[#2D2B35]"
+                  className="w-full sm:w-auto min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-xs font-semibold text-[#2D2B35]"
                 >
                   <option value="">All opted-in neighborhoods</option>
                   {neighborhoods.map((nh) => (

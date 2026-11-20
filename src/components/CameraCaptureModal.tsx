@@ -236,13 +236,13 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label="Take pothole photograph"
-      className="fixed inset-0 z-50 bg-[#1B1A22]/95 text-white flex flex-col justify-between p-4 sm:p-6 pt-safe pb-safe"
+      className="fixed inset-0 z-50 bg-[#1B1A22]/95 text-white flex flex-col justify-between gap-3 p-3 sm:p-6 pt-safe pb-safe overflow-y-auto overscroll-contain"
     >
       {/* Top Bar */}
-      <div className="max-w-3xl mx-auto w-full flex items-center justify-between gap-4">
+      <div className="max-w-3xl mx-auto w-full flex items-start justify-between gap-3 shrink-0">
         <div>
           <h2 className="font-display text-lg font-bold text-white">Camera Viewfinder</h2>
-          <p className="text-xs text-white/75">
+          <p className="hidden min-[380px]:block text-xs text-white/75">
             Frame the pothole clearly with surrounding pavement for street context.
           </p>
         </div>
@@ -259,8 +259,8 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       </div>
 
       {/* Live Video Preview Frame */}
-      <div className="max-w-3xl mx-auto w-full flex-1 flex items-center justify-center my-4 min-h-0">
-        <div className="relative w-full h-full max-h-[68dvh] rounded-2xl overflow-hidden bg-black border border-white/15 flex items-center justify-center">
+      <div className="max-w-3xl mx-auto w-full flex-1 flex items-center justify-center min-h-[220px]">
+        <div className="relative w-full h-full min-h-[220px] max-h-[64dvh] rounded-2xl overflow-hidden bg-black border border-white/15 flex items-center justify-center">
           <video
             ref={videoRef}
             autoPlay
@@ -343,8 +343,8 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       </div>
 
       {/* Bottom Shutter & Camera Controls (Thumb Zone) */}
-      <div className="max-w-3xl mx-auto w-full flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="max-w-3xl mx-auto w-full grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center sm:justify-between gap-2 sm:gap-3 shrink-0">
+        <div className="contents sm:flex sm:items-center sm:gap-2">
           <button
             type="button"
             onClick={() =>
@@ -352,7 +352,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             }
             disabled={isStarting || Boolean(cameraError)}
             aria-label="Switch front or rear camera"
-            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-45 text-white text-xs font-semibold inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition"
+            className="min-h-[44px] px-2.5 sm:px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-45 text-white text-xs font-semibold inline-flex items-center justify-center gap-2 whitespace-nowrap transition"
           >
             <SwitchCamera className="w-4 h-4" />
             <span>{hasMultipleCameras ? 'Flip Camera' : 'Switch Lens'}</span>
@@ -364,7 +364,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
               handleClose();
               onOpenNativeCamera();
             }}
-            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/90 text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition"
+            className="min-h-[44px] px-2.5 sm:px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/90 text-xs font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition"
           >
             <Camera className="w-4 h-4" />
             <span>Native Camera</span>
@@ -375,7 +375,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
           type="button"
           onClick={() => void handleSnapPhoto()}
           disabled={!isVideoReady || isCapturing || Boolean(cameraError)}
-          className="min-h-[48px] px-6 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] disabled:opacity-45 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-lg transition active:scale-[0.98]"
+          className="col-span-2 sm:col-span-1 min-h-[48px] px-6 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] disabled:opacity-45 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-lg transition active:scale-[0.98]"
         >
           {isCapturing ? (
             <Loader2 className="w-4 h-4 animate-spin" />

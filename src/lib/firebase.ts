@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, type FirebaseApp } from 'firebase/app';
 import {
   browserLocalPersistence,
   getAuth,
@@ -7,18 +7,61 @@ import {
   setPersistence,
   signInWithPopup,
   signOut,
+  type Auth,
 } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import { doc, getDocFromServer, getFirestore, type Firestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const LOCAL_DEV_FIRESTORE_ID = 'ai-studio-bca41787-ae3f-4dc1-a851-4fcb17cec913';
 
-export const auth = getAuth(app);
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.warn('Unable to configure local auth persistence:', err);
-});
+function resolveClientApiKey(): string {
+  const fromEnv = import.meta.env.VITE_FIREBASE_API_KEY;
+  if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) return fromEnv.trim();
+  return (firebaseConfig.apiKey || '').trim();
+}
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+function resolveClientAppId(): string {
+  const fromEnv = import.meta.env.VITE_FIREBASE_APP_ID;
+  if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) return fromEnv.trim();
+  return (firebaseConfig.appId || '').trim();
+}
+
+function resolveFirestoreDatabaseId(): string {
+  const fromEnv = import.meta.env.VITE_FIRESTORE_DATABASE_ID;
+  if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) return fromEnv.trim();
+  const fromFile = (firebaseConfig.firestoreDatabaseId || '').trim();
+  return fromFile || LOCAL_DEV_FIRESTORE_ID;
+}
+
+export const firebaseClientConfigured = Boolean(
+  resolveClientApiKey() && resolveClientAppId() && firebaseConfig.projectId
+);
+
+const missingConfigMessage =
+  'Firebase web config is missing. Add apiKey and appId to firebase-applet-config.json, or set VITE_FIREBASE_API_KEY and VITE_FIREBASE_APP_ID in .env.';
+
+let app: FirebaseApp | null = null;
+export let auth: Auth | null = null;
+export let db: Firestore | null = null;
+
+if (firebaseClientConfigured) {
+  app = initializeApp({
+    apiKey: resolveClientApiKey(),
+    appId: resolveClientAppId(),
+    authDomain: firebaseConfig.authDomain,
+    projectId: firebaseConfig.projectId,
+    storageBucket: firebaseConfig.storageBucket,
+    messagingSenderId: firebaseConfig.messagingSenderId || undefined,
+    measurementId: firebaseConfig.measurementId || undefined,
+  });
+  auth = getAuth(app);
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.warn('Unable to configure local auth persistence:', err);
+  });
+  db = getFirestore(app, resolveFirestoreDatabaseId());
+} else {
+  console.warn(`PatchUp: ${missingConfigMessage}`);
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -54,13 +97,13 @@ export function handleFirestoreError(
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid ?? null,
-      email: auth.currentUser?.email ?? null,
-      emailVerified: auth.currentUser?.emailVerified ?? null,
-      isAnonymous: auth.currentUser?.isAnonymous ?? null,
-      tenantId: auth.currentUser?.tenantId ?? null,
+      userId: auth?.currentUser?.uid ?? null,
+      email: auth?.currentUser?.email ?? null,
+      emailVerified: auth?.currentUser?.emailVerified ?? null,
+      isAnonymous: auth?.currentUser?.isAnonymous ?? null,
+      tenantId: auth?.currentUser?.tenantId ?? null,
       providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
+        auth?.currentUser?.providerData?.map((provider) => ({
           providerId: provider.providerId,
           email: provider.email,
         })) ?? [],
@@ -76,6 +119,9 @@ export async function testFirestoreConnection(): Promise<{
   ok: boolean;
   message: string;
 }> {
+  if (!db) {
+    return { ok: false, message: missingConfigMessage };
+  }
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return { ok: true, message: 'Connected to Cloud Firestore' };
@@ -184,7 +230,7 @@ export async function connectGoogleSheetsForExport(): Promise<string> {
       const client = initTokenClient({
         client_id: WORKSPACE_SHEETS_CLIENT_ID,
         scope: SHEETS_SCOPE,
-        hint: auth.currentUser?.email ?? undefined,
+        hint: auth?.currentUser?.email ?? undefined,
         callback: (resp) => {
           if (resp.access_token) {
             resolve(resp.access_token);
@@ -204,6 +250,9 @@ export async function connectGoogleSheetsForExport(): Promise<string> {
     return token;
   }
 
+  if (!auth) {
+    throw new Error(missingConfigMessage);
+  }
   const result = auth.currentUser
     ? await reauthenticateWithPopup(auth.currentUser, sheetsProvider)
     : await signInWithPopup(auth, sheetsProvider);
@@ -217,11 +266,15 @@ export async function connectGoogleSheetsForExport(): Promise<string> {
 }
 
 export async function signInWithGoogle() {
+  if (!auth) {
+    throw new Error(missingConfigMessage);
+  }
   return signInWithPopup(auth, googleProvider);
 }
 
 export async function signOutUser() {
   clearSheetsAccessToken();
+  if (!auth) return;
   return signOut(auth);
 }
 

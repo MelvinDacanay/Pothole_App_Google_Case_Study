@@ -151,6 +151,10 @@ export async function uploadImageWithRetry({
     throw new Error('Upload canceled.');
   }
 
+  if (!db) {
+    throw new Error('Firebase is not configured.');
+  }
+
   onProgress?.(20);
   const arrayBuffer = await compressed.blob.arrayBuffer();
   const payloadBytes = Bytes.fromUint8Array(new Uint8Array(arrayBuffer));

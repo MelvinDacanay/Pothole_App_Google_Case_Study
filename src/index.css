@@ -19,15 +19,68 @@
 }
 
 @layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   html {
     font-family: var(--font-sans);
     background-color: var(--color-canvas);
     color: var(--color-asphalt);
     -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overflow-x: clip;
+  }
+
+  body,
+  #root {
+    min-width: 320px;
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow-x: clip;
+  }
+
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    max-width: 100%;
+    font: inherit;
   }
 
   h1, h2, h3, h4, .font-display {
     font-family: var(--font-display);
+    overflow-wrap: anywhere;
+  }
+
+  p,
+  li,
+  dd {
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 639px) {
+    h1 {
+      line-height: 1.12;
+    }
+
+    h2,
+    h3 {
+      line-height: 1.2;
+    }
   }
 }
 
@@ -37,6 +90,19 @@
 
 .pt-safe {
   padding-top: env(safe-area-inset-top, 0px);
+}
+
+.px-safe {
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 .tabular-nums {

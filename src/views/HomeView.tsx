@@ -98,7 +98,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Hero Overview */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-8 shadow-xs">
+      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-4 min-[380px]:p-5 sm:p-8 shadow-xs">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
           <div className="lg:col-span-8 space-y-4">
             <div className="text-xs font-medium text-[#6E6978] flex flex-wrap items-center gap-2">
@@ -118,12 +118,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
               interactive Atlanta mapping, friend connections, and distinct-pothole rankings.
             </p>
 
-            <div className="flex flex-wrap items-center gap-3 pt-1">
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-3 pt-1">
               {user ? (
                 <button
                   type="button"
                   onClick={() => onNavigate('capture')}
-                  className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-sm font-semibold transition whitespace-nowrap shrink-0"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-sm font-semibold transition sm:whitespace-nowrap"
                 >
                   <Camera className="w-4 h-4 shrink-0" />
                   <span>Capture a Pothole</span>
@@ -134,7 +134,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={() => onNavigate('map')}
-                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-[#2D2B35] text-sm font-semibold transition whitespace-nowrap shrink-0"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-[#2D2B35] text-sm font-semibold transition sm:whitespace-nowrap"
               >
                 <MapPin className="w-4 h-4 text-[#4CB729] shrink-0" />
                 <span>Explore Atlanta Map</span>
@@ -142,7 +142,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenCivic}
-                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-[#2D2B35] text-sm font-semibold transition whitespace-nowrap shrink-0"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-[#2D2B35] text-sm font-semibold transition sm:whitespace-nowrap"
               >
                 <FileText className="w-4 h-4 text-[#4CB729] shrink-0" />
                 <span>{isAdmin ? 'Corridors & Admin Queue' : 'Corridors & 5-Pothole Reports'}</span>
@@ -150,7 +150,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenGames}
-                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-[#2D2B35] text-sm font-semibold transition whitespace-nowrap shrink-0"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-[#2D2B35] text-sm font-semibold transition sm:whitespace-nowrap"
               >
                 <Gamepad2 className="w-4 h-4 text-[#4CB729] shrink-0" />
                 <span>Play Minigames</span>
@@ -159,7 +159,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </div>
           </div>
 
-          <div className="lg:col-span-4 flex items-center justify-center bg-[#F7F7F8] rounded-2xl border border-[#E8DFC5] p-6">
+          <div className="hidden sm:flex lg:col-span-4 items-center justify-center bg-[#F7F7F8] rounded-2xl border border-[#E8DFC5] p-6">
             <img
               src="/assets/aistudio/PatchUp-Logo_18e66d4c.png"
               alt="PatchUp Atlanta street illustration"
@@ -180,7 +180,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
             <div className="rounded-xl bg-[#F7F7F8] p-3.5 border border-[#E8DFC5]/70">
               <div className="text-xs text-[#6E6978]">Distinct Spots</div>
               <div className="mt-1 font-mono text-2xl font-bold text-[#2D2B35] tabular-nums">

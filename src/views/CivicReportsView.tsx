@@ -1278,9 +1278,9 @@ export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain"
         >
-          <div className="max-w-md w-full bg-white rounded-2xl border border-[#E8DFC5] p-6 space-y-4 shadow-xl">
+          <div className="max-w-md w-full max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-white rounded-2xl border border-[#E8DFC5] p-4 sm:p-6 space-y-4 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <FileSpreadsheet className="w-5 h-5 text-[#4CB729]" />
