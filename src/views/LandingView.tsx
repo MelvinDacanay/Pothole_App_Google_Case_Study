@@ -8,6 +8,7 @@ import {
   Play,
 } from 'lucide-react';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { LandingCaptureModal } from '../components/LandingCaptureModal';
 import { useAuth } from '../context/AuthContext';
 
 const IMPACT_SLIDES = [
@@ -60,6 +61,7 @@ const IMPACT_SLIDES = [
 
 export const LandingView: React.FC = () => {
   const { authError, isSigningIn, signIn } = useAuth();
+  const [reportOpen, setReportOpen] = useState(false);
   const [impactSlide, setImpactSlide] = useState(0);
   const [impactAutoplay, setImpactAutoplay] = useState(
     () => !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -106,15 +108,23 @@ export const LandingView: React.FC = () => {
             </p>
 
             <div className="cover-actions">
+              <button
+                type="button"
+                className="landing-report-btn"
+                onClick={() => setReportOpen(true)}
+              >
+                <Camera className="w-4 h-4" />
+                <span>Report a pothole</span>
+              </button>
               <GoogleSignInButton
                 onClick={() => void signIn()}
                 disabled={isSigningIn}
-                label="Join with Google"
+                label="Sign in"
               />
-              <div className="landing-promise">
-                <Camera className="w-4 h-4" />
-                <span>One photo is all it takes</span>
-              </div>
+            </div>
+            <div className="landing-promise">
+              <Camera className="w-4 h-4" />
+              <span>Start now — no account needed to snap</span>
             </div>
 
             {authError && <p className="landing-auth-error">{authError}</p>}
@@ -211,12 +221,22 @@ export const LandingView: React.FC = () => {
           </div>
           <div>
             <p>Join your neighbors, document what the city misses, and make every snap count.</p>
-            <GoogleSignInButton
-              onClick={() => void signIn()}
-              disabled={isSigningIn}
-              label="Join with Google"
-            />
-            <span className="landing-signin-note">Free to join · Google account required</span>
+            <div className="cover-actions">
+              <button
+                type="button"
+                className="landing-report-btn"
+                onClick={() => setReportOpen(true)}
+              >
+                <Camera className="w-4 h-4" />
+                <span>Report a pothole</span>
+              </button>
+              <GoogleSignInButton
+                onClick={() => void signIn()}
+                disabled={isSigningIn}
+                label="Sign in"
+              />
+            </div>
+            <span className="landing-signin-note">Snap first · Google account needed to submit</span>
           </div>
           <MapPin className="landing-cta-pin" aria-hidden="true" />
         </section>
@@ -226,6 +246,8 @@ export const LandingView: React.FC = () => {
         <span>PATCHUP · ATLANTA, GEORGIA</span>
         <span>Independent community project · Not affiliated with the City of Atlanta or MARTA</span>
       </footer>
+
+      <LandingCaptureModal isOpen={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );
 };
