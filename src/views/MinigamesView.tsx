@@ -13,7 +13,7 @@ import { PotholeRepairGame } from '../components/games/PotholeRepairGame';
 import { AtlantaRunnerGame } from '../components/games/AtlantaRunnerGame';
 
 interface MinigamesViewProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export const MinigamesView: React.FC<MinigamesViewProps> = ({ onBack }) => {
@@ -64,19 +64,29 @@ export const MinigamesView: React.FC<MinigamesViewProps> = ({ onBack }) => {
   const runnerStat = stats.pothole_runner;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="city-page city-arcade max-w-6xl mx-auto space-y-6">
+      <div className="page-banner page-banner-arcade">
+        <div>
+          <span className="page-banner-index">PLAY / 05</span>
+          <h1>THE <em>PATCHUP</em><br />ARCADE.</h1>
+          <p>Two quick Atlanta street games. No pothole count inflation—just bragging rights.</p>
+        </div>
+        <Gamepad2 className="page-banner-icon" aria-hidden="true" />
+      </div>
       {/* Header */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+      <section className="arcade-selector bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={onBack}
-              className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] inline-flex items-center gap-1.5"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Back</span>
-            </button>
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] inline-flex items-center gap-1.5"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back</span>
+              </button>
+            )}
             <div>
               <h1 className="font-display text-xl sm:text-2xl font-extrabold text-[#2D2B35] flex items-center gap-2">
                 <Gamepad2 className="w-5 h-5 text-[#4CB729]" />
@@ -204,7 +214,7 @@ export const MinigamesView: React.FC<MinigamesViewProps> = ({ onBack }) => {
             <Info className="w-4 h-4 shrink-0 mt-0.5 text-[#4B4646]" />
             <span>
               Entertainment-only scores stay strictly separate from distinct pothole counts,
-              community leaderboards, badges, and civic corridor reports.
+              community leaderboards, badges, and community corridor reports.
             </span>
           </div>
           {syncNotice && (

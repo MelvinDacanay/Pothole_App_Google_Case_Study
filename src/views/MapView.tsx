@@ -24,7 +24,7 @@ interface MapViewProps {
   onSelectPothole: (pothole: PotholeRecord | null) => void;
   onAddEvidence: (pothole: PotholeRecord) => void;
   onStartCapture: () => void;
-  onOpenCivic: () => void;
+  onOpenCommunity: () => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -34,7 +34,7 @@ export const MapView: React.FC<MapViewProps> = ({
   onSelectPothole,
   onAddEvidence,
   onStartCapture,
-  onOpenCivic,
+  onOpenCommunity,
 }) => {
   const { user } = useAuth();
   const { potholes, loading } = useCommunityPotholes();
@@ -109,12 +109,20 @@ export const MapView: React.FC<MapViewProps> = ({
     : null;
 
   return (
-    <div className="space-y-5">
+    <div className="city-page city-map space-y-5">
+      <div className="page-banner page-banner-map">
+        <div>
+          <span className="page-banner-index">STREET VIEW / 02</span>
+          <h1>READ THE<br /><em>ROAD.</em></h1>
+          <p>Every pin is a Patcher’s field report. Filter the city, inspect the evidence, find the pattern.</p>
+        </div>
+        <MapPin className="page-banner-icon" aria-hidden="true" />
+      </div>
       {/* Map Header & Filters */}
-      <div className="min-w-0 bg-white rounded-2xl border border-[#E8DFC5] p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="map-toolbelt min-w-0 bg-white rounded-2xl border border-[#E8DFC5] p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-[#2D2B35]">
-            Atlanta Pothole Map
+            Live Atlanta Map
           </h1>
           <p className="text-xs sm:text-sm text-[#6E6978] mt-0.5 tabular-nums">
             {loading
@@ -182,7 +190,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
           <button
             type="button"
-            onClick={onOpenCivic}
+            onClick={onOpenCommunity}
             className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/40 text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
           >
             <FileText className="w-4 h-4 text-[#4CB729]" />
@@ -276,7 +284,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={onOpenCivic}
+                    onClick={onOpenCommunity}
                     className="font-semibold text-[#4CB729] hover:underline shrink-0"
                   >
                     View Report Cycle

@@ -1,12 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  ArrowRight,
   Bell,
   Camera,
   Check,
   CheckCircle2,
-  FileText,
-  Gamepad2,
   Info,
   MapPin,
   Users,
@@ -16,27 +15,24 @@ import { useCommunityPotholes, useMySubmissions } from '../hooks/usePotholes';
 import { useActivityFeed, useFriends, useNotifications } from '../hooks/useSocial';
 import {
   COORDINATE_SOURCE_LABELS,
+  loadMapsClientConfig,
+  MapsClientConfig,
   POTHOLE_STATUS_LABELS,
   PotholeRecord,
 } from '../lib/maps';
-import { GoogleSignInButton } from '../components/GoogleSignInButton';
-import { PWAInstallButton } from '../components/PWAInstallButton';
 import { NavTab } from '../components/AppShell';
+import { AtlantaMap } from '../components/AtlantaMap';
 
 interface HomeViewProps {
   onNavigate: (tab: NavTab) => void;
   onInspectPothole: (pothole: PotholeRecord) => void;
-  onOpenCivic: () => void;
-  onOpenGames: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigate,
   onInspectPothole,
-  onOpenCivic,
-  onOpenGames,
 }) => {
-  const { user, publicProfile, isSigningIn, signIn, isAdmin } = useAuth();
+  const { user, publicProfile } = useAuth();
   const { potholes, loading } = useCommunityPotholes();
   const { submissions } = useMySubmissions(user?.uid ?? null);
   const { acceptedFriends, incomingRequests } = useFriends(user);
@@ -46,8 +42,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [feedScope, setFeedScope] = useState<'all' | 'friends'>('all');
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [resolveMessage, setResolveMessage] = useState<string | null>(null);
+  const [mapsConfig, setMapsConfig] = useState<MapsClientConfig>({
+    configured: false,
+    apiKey: '',
+    mapId: 'DEMO_MAP_ID',
+  });
 
-  const pendingReviews = submissions.filter((s) => s.duplicateStatus === 'pending_review');
+  useEffect(() => {
+    loadMapsClientConfig().then(setMapsConfig);
+  }, []);
+
+  const pendingReviews = submissions.filter(
+    (s) => s.duplicateStatus === 'pending_review' && s.aiIsRoadDefect !== false
+  );
+  const classifierAppeals = submissions.filter(
+    (s) => s.duplicateStatus === 'pending_review' && s.aiIsRoadDefect === false
+  );
+  const gallerySubmissions = submissions.filter(
+    (s) => s.duplicateStatus !== 'pending_review' && s.duplicateStatus !== 'rejected'
+  );
 
   const friendUidSet = useMemo(
     () => new Set(acceptedFriends.map((f) => f.otherUid)),
@@ -96,77 +109,42 @@ export const HomeView: React.FC<HomeViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Hero Overview */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-4 min-[380px]:p-5 sm:p-8 shadow-xs">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          <div className="lg:col-span-8 space-y-4">
-            <div className="text-xs font-medium text-[#6E6978] flex flex-wrap items-center gap-2">
-              <span>Atlanta, Georgia</span>
-              <span aria-hidden="true">·</span>
-              <span>Community Road-Safety PWA</span>
-              <span aria-hidden="true">·</span>
-              <span>Live Map & Social Network</span>
-            </div>
-
-            <h1 className="font-display text-2xl sm:text-4xl font-extrabold tracking-tight text-[#2D2B35] text-balance">
-              Document Atlanta potholes, verify corridors, and build cleaner streets together.
-            </h1>
-
-            <p className="text-sm sm:text-base text-[#4B4646] max-w-2xl leading-relaxed">
-              PatchUp pairs GPS-verified street evidence with confidence-based duplicate review,
-              interactive Atlanta mapping, friend connections, and distinct-pothole rankings.
-            </p>
-
-            <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-3 pt-1">
-              {user ? (
-                <button
-                  type="button"
-                  onClick={() => onNavigate('capture')}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-sm font-semibold transition sm:whitespace-nowrap"
-                >
-                  <Camera className="w-4 h-4 shrink-0" />
-                  <span>Capture a Pothole</span>
-                </button>
-              ) : (
-                <GoogleSignInButton onClick={() => void signIn()} disabled={isSigningIn} />
-              )}
-              <button
-                type="button"
-                onClick={() => onNavigate('map')}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-[#2D2B35] text-sm font-semibold transition sm:whitespace-nowrap"
-              >
-                <MapPin className="w-4 h-4 text-[#4CB729] shrink-0" />
-                <span>Explore Atlanta Map</span>
+    <div className="city-page city-home editorial-home signed-in-home space-y-6">
+      <section className="home-command">
+        <div className="home-command-copy">
+          <span className="page-banner-index">FOUND A POTHOLE?</span>
+          <h1>TAKE A PHOTO.<br /><em>WE’LL HANDLE<br />THE REST.</em></h1>
+          <p>
+            PatchUp verifies the image, captures the location, checks nearby reports, and puts the
+            result on the map.
+          </p>
+          <button type="button" onClick={() => onNavigate('capture')} className="home-snap-action">
+            <Camera className="w-5 h-5" />
+            <span>Take a pothole photo</span>
+            <ArrowRight className="w-5 h-5" />
+          </button>
+          <span className="home-command-note">No forms after your photo · Location runs automatically</span>
+        </div>
+        <div className="home-live-map">
+          <div className="home-map-label">
+            <span>LIVE ATLANTA STREET MAP</span>
+            <div className="home-map-actions">
+              <strong>{loading ? '—' : potholes.length} reports</strong>
+              <button type="button" onClick={() => onNavigate('map')}>
+                <MapPin className="w-4 h-4" />
+                <span>Open full map</span>
               </button>
-              <button
-                type="button"
-                onClick={onOpenCivic}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-[#2D2B35] text-sm font-semibold transition sm:whitespace-nowrap"
-              >
-                <FileText className="w-4 h-4 text-[#4CB729] shrink-0" />
-                <span>{isAdmin ? 'Corridors & Admin Queue' : 'Corridors & 5-Pothole Reports'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={onOpenGames}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-[#2D2B35] text-sm font-semibold transition sm:whitespace-nowrap"
-              >
-                <Gamepad2 className="w-4 h-4 text-[#4CB729] shrink-0" />
-                <span>Play Minigames</span>
-              </button>
-              <PWAInstallButton />
             </div>
           </div>
-
-          <div className="hidden sm:flex lg:col-span-4 items-center justify-center bg-[#F7F7F8] rounded-2xl border border-[#E8DFC5] p-6">
-            <img
-              src="/assets/aistudio/PatchUp-Logo_18e66d4c.png"
-              alt="PatchUp Atlanta street illustration"
-              referrerPolicy="no-referrer"
-              className="w-44 h-44 sm:w-52 sm:h-52 object-contain"
-            />
-          </div>
+          <AtlantaMap
+            mapsConfig={mapsConfig}
+            potholes={potholes}
+            selectedPotholeId={null}
+            onSelectPothole={(pothole) => {
+              if (pothole) onInspectPothole(pothole);
+            }}
+            focusCoords={null}
+          />
         </div>
       </section>
 
@@ -210,7 +188,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={() => onNavigate('profile')}
-                className="min-h-[38px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 font-semibold text-[#2D2B35] inline-flex items-center gap-1.5 whitespace-nowrap"
+                className="min-h-[44px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 font-semibold text-[#2D2B35] inline-flex items-center gap-1.5 whitespace-nowrap"
               >
                 <Users className="w-3.5 h-3.5 text-[#4CB729]" />
                 <span>Manage Friends</span>
@@ -289,12 +267,50 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="pt-2 border-t border-[#E8DFC5] flex items-start gap-2.5 text-xs text-[#6E6978]">
             <Info className="w-4 h-4 shrink-0 mt-0.5 text-[#4B4646]" />
             <span>
-              PatchUp is an independent civic-social platform and is not operated by or officially
+              PatchUp is an independent community-social platform and is not operated by or officially
               integrated with the City of Atlanta, ATL311, or GDOT.
             </span>
           </div>
         </section>
       </div>
+
+      <section className="home-gallery bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+        <div className="home-section-heading">
+          <div>
+            <span className="page-banner-index">YOUR CAMERA ROLL</span>
+            <h2 className="font-display text-xl font-bold text-[#2D2B35]">Potholes you’ve captured</h2>
+          </div>
+          <span className="font-mono text-xs tabular-nums">
+            {gallerySubmissions.length} approved photos
+          </span>
+        </div>
+        {gallerySubmissions.length === 0 ? (
+          <div className="home-gallery-empty">
+            <Camera className="w-7 h-7" />
+            <div>
+              <strong>Your gallery starts with one snap.</strong>
+              <p>Photograph a pothole and it will appear here after processing.</p>
+            </div>
+            <button type="button" onClick={() => onNavigate('capture')}>Take your first photo</button>
+          </div>
+        ) : (
+          <div className="home-photo-grid">
+            {gallerySubmissions.slice(0, 8).map((submission) => (
+              <figure key={submission.submissionId}>
+                <img
+                  src={submission.photoUrl}
+                  alt={`Pothole submission at ${submission.streetName}`}
+                  referrerPolicy="no-referrer"
+                />
+                <figcaption>
+                  <strong>{submission.streetName}</strong>
+                  <span>{submission.duplicateStatus.replaceAll('_', ' ')}</span>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Social Activity Feed & In-App Notifications */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -314,7 +330,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setFeedScope('all')}
-                  className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+                  className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
                     feedScope === 'all'
                       ? 'bg-white text-[#2D2B35] shadow-xs'
                       : 'text-[#6E6978] hover:text-[#2D2B35]'
@@ -325,7 +341,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setFeedScope('friends')}
-                  className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+                  className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
                     feedScope === 'friends'
                       ? 'bg-white text-[#2D2B35] shadow-xs'
                       : 'text-[#6E6978] hover:text-[#2D2B35]'
@@ -367,7 +383,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onInspectPothole(matchingPothole)}
-                        className="min-h-[38px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 font-semibold text-[#2D2B35] whitespace-nowrap shrink-0"
+                        className="min-h-[44px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 font-semibold text-[#2D2B35] whitespace-nowrap shrink-0"
                       >
                         View Pin
                       </button>
@@ -394,7 +410,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={() => void markAllRead()}
-                className="min-h-[38px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
+                className="min-h-[44px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
               >
                 Mark all read
               </button>
@@ -449,6 +465,48 @@ export const HomeView: React.FC<HomeViewProps> = ({
           )}
         </section>
       </div>
+
+      {user && classifierAppeals.length > 0 && (
+        <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-[#D97706]" />
+              <h2 className="font-display text-lg font-bold text-[#2D2B35]">
+                Photos awaiting admin review ({classifierAppeals.length})
+              </h2>
+            </div>
+            <span className="text-xs text-[#6E6978]">Not counted while under review</span>
+          </div>
+          <div className="divide-y divide-[#E8DFC5]">
+            {classifierAppeals.map((sub) => (
+              <div
+                key={sub.submissionId}
+                className="py-3.5 flex items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <img
+                    src={sub.photoUrl}
+                    alt={sub.streetName}
+                    referrerPolicy="no-referrer"
+                    className="w-12 h-12 rounded-xl object-cover border border-[#E8DFC5] shrink-0 bg-[#F7F7F8]"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-[#2D2B35] truncate">
+                      {sub.formattedAddress}
+                    </div>
+                    <div className="text-xs text-[#6E6978]">
+                      An admin will review your photo before it can be counted.
+                    </div>
+                  </div>
+                </div>
+                <span className="font-mono text-[11px] font-bold uppercase text-[#6E6978]">
+                  In review
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Pending Duplicate Reviews for Signed-In Contributor */}
       {user && pendingReviews.length > 0 && (

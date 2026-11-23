@@ -99,6 +99,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
+  const [manualLocationOpen, setManualLocationOpen] = useState(false);
+  const [classificationAppealed, setClassificationAppealed] = useState(false);
   const [compressedPhoto, setCompressedPhoto] = useState<CompressedImageResult | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [mediaId, setMediaId] = useState<string | null>(null);
@@ -362,6 +364,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       setPreviewUrl(nextPreview);
       setCompressedPhoto(compressed);
       setExifCoordsFound(exifGps);
+      setClassificationAppealed(false);
 
       if (exifGps && !preselectedPothole && !coords) {
         setCoords(exifGps);
@@ -369,10 +372,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         setAccuracyMeters(undefined);
         setLocationUserCorrected(false);
         setGpsStatusMsg('Loaded genuine GPS coordinates from photograph EXIF metadata.');
-      } else if (source === 'camera' && !coords && !exifGps) {
-        setGpsStatusMsg(
-          'Camera photo captured. Tap "Use Current GPS" or tap the Atlanta map below to set the exact pothole pin.'
-        );
+      } else if (!coords && !exifGps) {
+        handleUseCurrentGps();
       }
 
       await startUpload(compressed);
@@ -394,7 +395,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     }
   };
 
-  const handleUseCurrentGps = () => {
+  function handleUseCurrentGps() {
     if (!('geolocation' in navigator)) {
       setGpsStatusMsg('Browser geolocation is unavailable here. Tap the map to place a manual pin.');
       return;
@@ -438,7 +439,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         maximumAge: 15000,
       }
     );
-  };
+  }
 
   const handleManualPinChange = (nextCoords: { lat: number; lng: number }) => {
     setCoords(nextCoords);
@@ -496,6 +497,13 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (!mediaId || aiResult.status !== 'skipped' || analyzingAi) return;
+    void handleOptionalAiCheck();
+    // The uploaded media ID is the trigger; the classifier runs once per new photo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaId]);
+
   const topCandidateConfidence = useMemo(() => {
     const match = candidates.find((c) => c.potholeId === selectedCandidateId) ?? candidates[0];
     return match ? match.confidence : 0;
@@ -508,8 +516,11 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       !uploading &&
       coords &&
       streetName.trim().length > 0 &&
+      aiResult.status === 'completed' &&
+      (aiResult.isRoadDefect || classificationAppealed) &&
       (actionType !== 'add_evidence' || selectedCandidateId)
   );
+  const submissionActionType = classificationAppealed ? 'provisional_review' : actionType;
 
   const handleSubmitPothole = async () => {
     if (!user || !mediaId || !coords || !canSubmit) return;
@@ -535,8 +546,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           lng: coords.lng,
           coordinateSource,
           accuracyMeters,
-          actionType,
-          targetPotholeId: actionType === 'add_evidence' ? selectedCandidateId : undefined,
+          actionType: submissionActionType,
+          targetPotholeId: submissionActionType === 'add_evidence' ? selectedCandidateId : undefined,
           candidatePotholeIds: candidateIds,
           formattedAddress:
             formattedAddress.trim() || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}, Atlanta, GA`,
@@ -582,6 +593,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     setSubmissionId(createDraftSubmissionId());
     setUploadProgress(0);
     setUploadError(null);
+    setClassificationAppealed(false);
     setExifCoordsFound(null);
     setNotes('');
     setSubmittedResult(null);
@@ -613,8 +625,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           Sign in to Document Potholes
         </h1>
         <p className="text-sm text-[#4B4646] max-w-md mx-auto leading-relaxed">
-          PatchUp requires verified Firebase Authentication before uploading road photographs,
-          running 25m duplicate checks, or publishing pins to the Atlanta map.
+          Sign in to photograph a pothole, verify it, and add it to Atlanta’s community map.
         </p>
         <div className="pt-2 flex justify-center">
           <GoogleSignInButton onClick={() => void signIn()} disabled={isSigningIn} />
@@ -625,7 +636,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   if (submittedResult) {
     return (
-      <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-[#E8DFC5] p-6 sm:p-8 space-y-5">
+      <div className="city-page city-capture capture-success max-w-2xl mx-auto bg-white rounded-2xl border border-[#E8DFC5] p-6 sm:p-8 space-y-5">
         <div className="flex items-start gap-3">
           <CheckCircle2 className="w-8 h-8 text-[#4CB729] shrink-0" />
           <div>
@@ -694,16 +705,24 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className={`city-page city-capture max-w-6xl mx-auto space-y-6 ${manualLocationOpen ? 'manual-location-open' : ''}`}>
+      <div className="page-banner page-banner-capture">
+        <div>
+          <span className="page-banner-index">FIELD TOOL / 03</span>
+          <h1>SNAP THE<br /><em>EVIDENCE.</em></h1>
+          <p>Take the picture. PatchUp handles location, verification, nearby-report checks, and publishing.</p>
+        </div>
+        <Camera className="page-banner-icon" aria-hidden="true" />
+      </div>
       {/* Header */}
-      <div className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="capture-toolbelt bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold text-[#2D2B35]">
             {preselectedPothole ? 'Add Evidence Photo' : 'Capture & Verify Pothole'}
           </h1>
           <p className="text-xs sm:text-sm text-[#6E6978] mt-1">
-            Client-compressed photos upload to isolated Spark-tier media storage; pin coordinates
-            come strictly from EXIF GPS, one-time browser GPS, or manual map placement.
+            Take one clear photo of the pothole. We’ll process the image and capture its location
+            automatically.
           </p>
         </div>
         {preselectedPothole && (
@@ -718,6 +737,15 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           >
             <X className="w-4 h-4" />
             <span>Switch to New Spot</span>
+          </button>
+        )}
+        {!preselectedPothole && (
+          <button
+            type="button"
+            onClick={() => setManualLocationOpen((open) => !open)}
+            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35]"
+          >
+            {manualLocationOpen ? 'Hide manual map pin' : 'Pin a location instead'}
           </button>
         )}
       </div>
@@ -752,13 +780,10 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-            1. Street Photograph (JPEG, PNG, WebP)
+            Take a pothole photo
           </h2>
           {compressedPhoto && (
-            <span className="font-mono text-xs text-[#6E6978] tabular-nums">
-              {Math.round(compressedPhoto.originalBytes / 1024)} KB →{' '}
-              {Math.round(compressedPhoto.compressedBytes / 1024)} KB
-            </span>
+            <span className="font-mono text-xs text-[#6E6978]">PHOTO READY</span>
           )}
         </div>
 
@@ -785,9 +810,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
               <div className="text-sm font-semibold text-[#2D2B35]">
                 Take a Photo or Choose from Library
               </div>
-              <div className="text-xs text-[#6E6978]">
-                Max 10 MB input · Automatically resized & compressed under 380 KB before upload
-              </div>
+              <div className="text-xs text-[#6E6978]">JPG, PNG, or WebP · Up to 10 MB</div>
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-3">
@@ -824,16 +847,16 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                 <div className="flex items-center justify-between text-xs font-medium text-[#2D2B35]">
                   <span>
                     {uploading
-                      ? 'Uploading compressed photo...'
+                      ? 'Uploading photo...'
                       : mediaId
-                        ? 'Uploaded to Spark media store'
+                        ? 'Photo uploaded'
                         : 'Upload incomplete'}
                   </span>
                   <span className="font-mono tabular-nums">{uploadProgress}%</span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-[#F7F7F8] border border-[#E8DFC5] overflow-hidden">
                   <div
-                    className={`h-full transition-all ${
+                    className={`h-full transition-[width] duration-200 ${
                       uploadError ? 'bg-[#DC2626]' : 'bg-[#4CB729]'
                     }`}
                     style={{ width: `${uploadProgress}%` }}
@@ -907,14 +930,15 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       </section>
 
       {/* Step 2: Explicit Location & Pin Verification */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+      <section className="capture-location-details bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-              2. Exact Location & Street Verification
+              Report with a map pin instead
             </h2>
             <p className="text-xs text-[#6E6978] mt-0.5">
-              One-time GPS permission or manual pin placement—no background location tracking.
+              Use this fallback when you need to place or correct the location manually. PatchUp
+              never tracks your location in the background.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1042,7 +1066,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       </section>
 
       {/* Step 3: 25m Duplicate Review & Optional AI Check */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+      <section className="capture-internal-checks bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="font-display text-lg font-bold text-[#2D2B35]">
@@ -1220,6 +1244,66 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         </div>
       </section>
 
+      <section className="capture-verification bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4" aria-live="polite">
+        <div>
+          <span className="page-banner-index">AUTOMATIC PHOTO CHECK</span>
+          <h2 className="font-display text-lg font-bold text-[#2D2B35]">We verify every photo for you</h2>
+          <p className="text-sm text-[#4B4646] mt-1">
+            You only need to take the picture. PatchUp checks whether it shows a pothole before it
+            can appear on the community map.
+          </p>
+        </div>
+
+        {!mediaId ? (
+          <div className="capture-check-state">Take or choose a photo to begin automatic verification.</div>
+        ) : analyzingAi || aiResult.status === 'skipped' ? (
+          <div className="capture-check-state is-processing">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            <span>Checking your photo…</span>
+          </div>
+        ) : aiResult.status === 'unavailable' ? (
+          <div className="capture-check-state is-warning">
+            <AlertTriangle className="w-5 h-5" />
+            <div>
+              <strong>We couldn’t verify this photo yet.</strong>
+              <p>Try the check again before submitting.</p>
+            </div>
+            <button type="button" onClick={() => void handleOptionalAiCheck()}>Try verification again</button>
+          </div>
+        ) : aiResult.isRoadDefect ? (
+          <div className="capture-check-state is-approved">
+            <CheckCircle2 className="w-5 h-5" />
+            <div>
+              <strong>Pothole confirmed.</strong>
+              <p>Your photo is ready to submit.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="capture-check-state is-rejected">
+            <AlertTriangle className="w-5 h-5" />
+            <div>
+              <strong>
+                Hm, we determined that this photo isn't of a pothole. Make sure you're only
+                snapping pictures of potholes!
+              </strong>
+            </div>
+            {!classificationAppealed ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setClassificationAppealed(true);
+                  setActionType('provisional_review');
+                }}
+              >
+                Did we get this wrong?
+              </button>
+            ) : (
+              <span className="capture-review-queued">This photo will be sent for admin review.</span>
+            )}
+          </div>
+        )}
+      </section>
+
       {/* Step 4: Submit Footer */}
       <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-3">
         {submitError && (
@@ -1231,12 +1315,20 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="text-xs text-[#6E6978]">
             {!mediaId
-              ? 'Upload a pothole photo in Step 1 to enable submission.'
+              ? 'Take or choose a pothole photo to continue.'
+              : analyzingAi || aiResult.status === 'skipped'
+                ? 'We’re checking whether this photo shows a pothole.'
+                : aiResult.status === 'unavailable'
+                  ? 'Photo verification must finish before submission.'
+                  : !aiResult.isRoadDefect && !classificationAppealed
+                    ? 'Use “Did we get this wrong?” to request a manual review.'
               : !coords
-                ? 'Choose a GPS fix or place a map pin in Step 2 to enable submission.'
+                ? 'Waiting for the photo location. You can also open the manual map pin above.'
                 : !streetName.trim()
-                  ? 'Enter or reverse-geocode a street name in Step 2.'
-                  : 'Ready to commit via atomic Firestore transaction.'}
+                  ? 'Looking up the street name from the photo location.'
+                  : classificationAppealed
+                    ? 'Ready to send this photo for admin review.'
+                    : 'Your verified pothole is ready to publish.'}
           </div>
 
           <button
@@ -1252,12 +1344,12 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
             )}
             <span>
               {submitting
-                ? 'Saving Record...'
-                : actionType === 'add_evidence'
-                  ? 'Submit Supporting Evidence'
-                  : actionType === 'provisional_review'
-                    ? 'Save for Duplicate Review'
-                    : 'Publish Distinct Pothole'}
+                  ? 'Submitting…'
+                : submissionActionType === 'add_evidence'
+                  ? 'Submit photo evidence'
+                  : submissionActionType === 'provisional_review'
+                    ? 'Send for review'
+                    : 'Publish pothole'}
             </span>
           </button>
         </div>

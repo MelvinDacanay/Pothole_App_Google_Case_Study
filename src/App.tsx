@@ -1,5 +1,5 @@
 import React, { Component, useEffect, useState } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppShell, NavTab } from './components/AppShell';
 import { PotholeRecord } from './lib/maps';
 import { HomeView } from './views/HomeView';
@@ -7,8 +7,9 @@ import { MapView } from './views/MapView';
 import { CaptureView } from './views/CaptureView';
 import { LeaderboardView } from './views/LeaderboardView';
 import { ProfileView } from './views/ProfileView';
-import { CivicReportsView } from './views/CivicReportsView';
+import { CommunityReportsView } from './views/CommunityReportsView';
 import { MinigamesView } from './views/MinigamesView';
+import { LandingView } from './views/LandingView';
 import { firebaseClientConfigured } from './lib/firebase';
 
 interface ErrorBoundaryState {
@@ -52,9 +53,10 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, ErrorBou
   }
 }
 
-export default function App() {
+function AppExperience() {
+  const { authReady, user } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('home');
-  const [subView, setSubView] = useState<'none' | 'civic' | 'games'>('none');
+  const [subView, setSubView] = useState<'none' | 'community'>('none');
   const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
   const [selectedPothole, setSelectedPothole] = useState<PotholeRecord | null>(null);
   const [pendingFocusPotholeId, setPendingFocusPotholeId] = useState<string | null>(null);
@@ -91,9 +93,17 @@ export default function App() {
     setActiveTab('map');
   };
 
+  if (!authReady) {
+    return (
+      <div className="auth-loading-screen" role="status" aria-live="polite">
+        <img src="/patchup-logo.png" alt="PatchUp" />
+        <span>Checking your block…</span>
+      </div>
+    );
+  }
+
   return (
-    <AppErrorBoundary>
-      <AuthProvider>
+    <>
         {!firebaseClientConfigured && (
           <div className="bg-sky-50 border-b border-sky-200 text-sky-950 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50">
             Local preview mode: add Firebase web <code className="font-mono">apiKey</code> and{' '}
@@ -120,22 +130,21 @@ export default function App() {
           </div>
         )}
 
+        {!user ? (
+          <LandingView />
+        ) : (
         <AppShell activeTab={activeTab} onSelectTab={handleSelectTab}>
-          {subView === 'civic' ? (
-            <CivicReportsView
+          {subView === 'community' ? (
+            <CommunityReportsView
               onBack={() => setSubView('none')}
               onInspectPothole={handleInspectPothole}
             />
-          ) : subView === 'games' ? (
-            <MinigamesView onBack={() => setSubView('none')} />
           ) : (
             <>
               {activeTab === 'home' && (
                 <HomeView
                   onNavigate={handleSelectTab}
                   onInspectPothole={handleInspectPothole}
-                  onOpenCivic={() => setSubView('civic')}
-                  onOpenGames={() => setSubView('games')}
                 />
               )}
               {activeTab === 'map' && (
@@ -149,7 +158,7 @@ export default function App() {
                     setPreselectedEvidenceTarget(null);
                     handleSelectTab('capture');
                   }}
-                  onOpenCivic={() => setSubView('civic')}
+                  onOpenCommunity={() => setSubView('community')}
                 />
               )}
               {activeTab === 'capture' && (
@@ -160,15 +169,26 @@ export default function App() {
                 />
               )}
               {activeTab === 'leaderboard' && <LeaderboardView />}
+              {activeTab === 'arcade' && <MinigamesView />}
               {activeTab === 'profile' && (
                 <ProfileView
-                  onOpenCivic={() => setSubView('civic')}
-                  onOpenGames={() => setSubView('games')}
+                  onOpenCommunity={() => setSubView('community')}
+                  onOpenGames={() => handleSelectTab('arcade')}
                 />
               )}
             </>
           )}
         </AppShell>
+        )}
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AuthProvider>
+        <AppExperience />
       </AuthProvider>
     </AppErrorBoundary>
   );
