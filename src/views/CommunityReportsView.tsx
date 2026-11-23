@@ -18,7 +18,7 @@ import {
 } from '../lib/firebase';
 import {
   AdminAuditEvent,
-  CivicReportRecord,
+  CommunityReportRecord,
   JURISDICTION_LABELS,
   POTHOLE_STATUS_LABELS,
   PotholeRecord,
@@ -29,26 +29,26 @@ import {
   StreetSegmentRecord,
 } from '../lib/maps';
 
-interface CivicReportsViewProps {
+interface CommunityReportsViewProps {
   onBack: () => void;
   onInspectPothole: (pothole: PotholeRecord) => void;
 }
 
 interface PendingSheetConfirm {
-  report: CivicReportRecord;
+  report: CommunityReportRecord;
   spreadsheetTitle: string;
   potholes: PotholeRecord[];
   totalRows: number;
 }
 
-export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
+export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
   onBack,
   onInspectPothole,
 }) => {
   const { user, isAdmin } = useAuth();
 
   const [segments, setSegments] = useState<StreetSegmentRecord[]>([]);
-  const [reports, setReports] = useState<CivicReportRecord[]>([]);
+  const [reports, setReports] = useState<CommunityReportRecord[]>([]);
   const [adminPotholes, setAdminPotholes] = useState<PotholeRecord[]>([]);
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,7 +96,7 @@ export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
         if (res.ok) {
           const data = (await res.json()) as {
             segments?: StreetSegmentRecord[];
-            reports?: CivicReportRecord[];
+            reports?: CommunityReportRecord[];
             potholes?: PotholeRecord[];
             auditEvents?: AdminAuditEvent[];
           };
@@ -111,7 +111,7 @@ export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
 
       const [segRes, repRes] = await Promise.all([fetch('/api/segments'), fetch('/api/reports')]);
       const segJson = (await segRes.json()) as { segments?: StreetSegmentRecord[] };
-      const repJson = (await repRes.json()) as { reports?: CivicReportRecord[] };
+      const repJson = (await repRes.json()) as { reports?: CommunityReportRecord[] };
       setSegments(segJson.segments ?? []);
       setReports(repJson.reports ?? []);
     } catch {
@@ -367,7 +367,7 @@ export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
     }
   };
 
-  const handleRequestSheetExport = (report: CivicReportRecord) => {
+  const handleRequestSheetExport = (report: CommunityReportRecord) => {
     const memberPotholes = report.snapshotPotholeIds
       .map((id) => potholeById.get(id))
       .filter((p): p is PotholeRecord => Boolean(p));
@@ -553,7 +553,7 @@ export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
         <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-3.5 flex items-start gap-2.5 text-xs text-[#4B4646]">
           <AlertTriangle className="w-4 h-4 text-[#D97706] shrink-0 mt-0.5" />
           <span>
-            <strong>Independent Civic Platform:</strong> PatchUp does not automatically transmit
+            <strong>Independent Community Platform:</strong> PatchUp does not automatically transmit
             submissions to ATL311 or GDOT. Reports remain in{' '}
             <span className="font-mono">Awaiting Admin Review</span> or{' '}
             <span className="font-mono">Ready for Submission</span> until an admin logs a verified
@@ -689,7 +689,7 @@ export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
 
                   <div className="h-2 rounded-full bg-white border border-[#E8DFC5] overflow-hidden">
                     <div
-                      className={`h-full transition-all ${
+                      className={`h-full transition-[width] duration-200 ${
                         seg.confidence === 'verified' ? 'bg-[#4CB729]' : 'bg-[#D97706]'
                       }`}
                       style={{ width: `${progressPct}%` }}
@@ -719,7 +719,7 @@ export const CivicReportsView: React.FC<CivicReportsViewProps> = ({
               <ShieldCheck className="w-5 h-5 text-[#4CB729]" />
               <div>
                 <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-                  Admin Civic Oversight & Verification Queue
+                  Admin Community Oversight & Verification Queue
                 </h2>
                 <p className="text-xs text-[#6E6978]">
                   Verify corridor confidence, review 5-pothole packets, confirm repairs, and export

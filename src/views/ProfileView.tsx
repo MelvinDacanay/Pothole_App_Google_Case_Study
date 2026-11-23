@@ -41,11 +41,11 @@ interface ServerHealth {
 }
 
 interface ProfileViewProps {
-  onOpenCivic: () => void;
+  onOpenCommunity: () => void;
   onOpenGames: () => void;
 }
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCivic, onOpenGames }) => {
+export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCommunity, onOpenGames }) => {
   const {
     user,
     publicProfile,
@@ -277,8 +277,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCivic, onOpenGam
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-8 space-y-6">
+    <div className="city-page city-profile max-w-6xl mx-auto space-y-6">
+      <div className="page-banner page-banner-profile">
+        <div>
+          <span className="page-banner-index">PATCHER ID / 06</span>
+          <h1>THIS IS YOUR<br /><em>PATCH.</em></h1>
+          <p>Your public identity, neighborhood connections, evidence history, and settings in one place.</p>
+        </div>
+        <Users className="page-banner-icon" aria-hidden="true" />
+      </div>
+      <section className="profile-card bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="relative">
@@ -349,11 +357,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCivic, onOpenGam
             </button>
             <button
               type="button"
-              onClick={onOpenCivic}
+              onClick={onOpenCommunity}
               className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-xs font-semibold text-[#2D2B35] transition whitespace-nowrap"
             >
               <FileText className="w-4 h-4 text-[#4CB729]" />
-              <span>{isAdmin ? 'Admin Civic Queue' : 'Corridors & Reports'}</span>
+              <span>{isAdmin ? 'Admin Community Queue' : 'Corridors & Reports'}</span>
             </button>
             <PWAInstallButton compact />
             {user ? (

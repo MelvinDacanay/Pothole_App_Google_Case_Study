@@ -75,8 +75,16 @@ export const LeaderboardView: React.FC = () => {
   }, [user, period, selectedNeighborhood]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-8 space-y-5">
+    <div className="city-page city-leaderboard max-w-6xl mx-auto space-y-6">
+      <div className="page-banner page-banner-ranks">
+        <div>
+          <span className="page-banner-index">THE SCORE / 04</span>
+          <h1>WHO RUNS<br /><em>THE BLOCK?</em></h1>
+          <p>Verified finds only. See which Patchers and neighborhoods are putting in the street work.</p>
+        </div>
+        <Award className="page-banner-icon" aria-hidden="true" />
+      </div>
+      <section className="rank-board bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-8 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="font-display text-2xl font-bold text-[#2D2B35]">
@@ -209,12 +217,12 @@ export const LeaderboardView: React.FC = () => {
         )}
       </section>
 
-      {/* Civic Achievements Showcase */}
+      {/* Community Achievements Showcase */}
       {user && (
         <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-8 space-y-4">
           <div>
             <h2 className="font-display text-xl font-bold text-[#2D2B35]">
-              Atlanta Civic Achievements
+              Atlanta Community Achievements
             </h2>
             <p className="text-xs text-[#6E6978] mt-1">
               Evaluated server-side from accepted distinct potholes and credibly confirmed

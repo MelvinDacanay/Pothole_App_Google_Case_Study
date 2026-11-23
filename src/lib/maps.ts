@@ -77,7 +77,7 @@ export interface StreetSegmentRecord {
   updatedAt?: Timestamp;
 }
 
-export interface CivicReportRecord {
+export interface CommunityReportRecord {
   reportId: string;
   segmentId: string;
   cycleNumber: number;

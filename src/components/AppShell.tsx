@@ -1,10 +1,10 @@
 import React from 'react';
-import { Award, Camera, Home, MapPin, User as UserIcon } from 'lucide-react';
+import { Award, Camera, Gamepad2, Home, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { OfflineBanner } from './OfflineBanner';
 
-export type NavTab = 'home' | 'map' | 'capture' | 'leaderboard' | 'profile';
+export type NavTab = 'home' | 'map' | 'capture' | 'leaderboard' | 'arcade' | 'profile';
 
 interface AppShellProps {
   activeTab: NavTab;
@@ -12,11 +12,18 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
-const NAV_ITEMS: { id: NavTab; label: string; mobileLabel: string; icon: React.FC<{ className?: string }> }[] = [
+const DESKTOP_NAV_ITEMS: { id: NavTab; label: string; mobileLabel: string; icon: React.FC<{ className?: string }> }[] = [
   { id: 'home', label: 'Home', mobileLabel: 'Home', icon: Home },
-  { id: 'map', label: 'Map', mobileLabel: 'Map', icon: MapPin },
-  { id: 'capture', label: 'Capture', mobileLabel: 'Capture', icon: Camera },
   { id: 'leaderboard', label: 'Leaderboard', mobileLabel: 'Ranks', icon: Award },
+  { id: 'arcade', label: 'Arcade', mobileLabel: 'Arcade', icon: Gamepad2 },
+  { id: 'profile', label: 'Profile', mobileLabel: 'Profile', icon: UserIcon },
+];
+
+const MOBILE_NAV_ITEMS: typeof DESKTOP_NAV_ITEMS = [
+  { id: 'home', label: 'Home', mobileLabel: 'Home', icon: Home },
+  { id: 'leaderboard', label: 'Leaderboard', mobileLabel: 'Ranks', icon: Award },
+  { id: 'capture', label: 'Capture', mobileLabel: 'Snap', icon: Camera },
+  { id: 'arcade', label: 'Arcade', mobileLabel: 'Arcade', icon: Gamepad2 },
   { id: 'profile', label: 'Profile', mobileLabel: 'Profile', icon: UserIcon },
 ];
 
@@ -24,32 +31,28 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
   const { user, publicProfile, isSigningIn, signIn } = useAuth();
 
   return (
-    <div className="min-h-dvh flex flex-col bg-[#F7F7F8] text-[#3A3535]">
+    <div className="patchup-shell min-h-dvh flex flex-col bg-[#F7F7F8] text-[#3A3535]">
       <OfflineBanner />
 
-      {/* Desktop Top Bar (3-zone contract) */}
       <header className="hidden lg:block sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-[#E8DFC5]">
-        <div className="max-w-7xl mx-auto px-5 xl:px-6 h-16 flex items-center justify-between gap-4 xl:gap-8">
-          {/* Zone 1: Single-line Brand Wordmark */}
+        <div className="shell-topline">
+          <span>ATLANTA'S COMMUNITY ROAD WATCH</span>
+        </div>
+        <div className="shell-header-inner max-w-[1440px] mx-auto px-5 xl:px-8 h-[76px] flex items-center justify-between gap-4 xl:gap-8">
           <button
             type="button"
             onClick={() => onSelectTab('home')}
-            className="flex items-center gap-2.5 whitespace-nowrap shrink-0 min-h-[44px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4CB729] rounded-lg"
+            className="patchup-wordmark flex items-center whitespace-nowrap shrink-0 min-h-[44px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ff5833]"
           >
             <img
-              src="/assets/aistudio/PatchUp-Logo_18e66d4c.png"
-              alt="PatchUp logo"
-              referrerPolicy="no-referrer"
-              className="w-9 h-9 object-contain"
+              src="/patchup-logo.png"
+              alt="PatchUp"
+              className="patchup-logo patchup-logo-desktop"
             />
-            <span className="font-display text-xl font-extrabold tracking-tight text-[#2D2B35]">
-              PatchUp
-            </span>
           </button>
 
-          {/* Zone 2: 5 concise single-line navigation links */}
           <nav className="flex items-center gap-3 xl:gap-6" aria-label="Primary">
-            {NAV_ITEMS.map((item) => {
+            {DESKTOP_NAV_ITEMS.map((item) => {
               const isActive = activeTab === item.id;
               const isCapture = item.id === 'capture';
               return (
@@ -57,12 +60,12 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
                   key={item.id}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
-                  className={`min-h-[44px] px-2 text-sm font-semibold whitespace-nowrap shrink-0 transition border-b-2 ${
+                  className={`shell-nav-link min-h-[44px] px-2 text-xs font-bold uppercase tracking-[0.12em] whitespace-nowrap shrink-0 transition ${
                     isActive
-                      ? 'text-[#2D2B35] border-[#4CB729]'
+                      ? 'is-active text-[#2D2B35]'
                       : isCapture
-                        ? 'text-[#4CB729] border-transparent hover:text-[#3FA31F]'
-                        : 'text-[#6E6978] border-transparent hover:text-[#3A3535]'
+                        ? 'text-[#e7421e] hover:text-[#b92c10]'
+                        : 'text-[#536159] hover:text-[#17231d]'
                   }`}
                 >
                   {item.label}
@@ -71,13 +74,12 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
             })}
           </nav>
 
-          {/* Zone 3: 1 primary contextual action */}
           <div className="shrink-0">
             {user ? (
               <button
                 type="button"
                 onClick={() => onSelectTab('profile')}
-                className="inline-flex items-center gap-2.5 min-h-[44px] px-3 py-1.5 rounded-xl bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 border border-[#E8DFC5] text-sm font-semibold text-[#2D2B35] whitespace-nowrap shrink-0 transition"
+                className="account-chip inline-flex items-center gap-2.5 min-h-[44px] px-3 py-1.5 bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 border border-[#E8DFC5] text-sm font-semibold text-[#2D2B35] whitespace-nowrap shrink-0 transition"
               >
                 {publicProfile?.photoURL ? (
                   <img
@@ -102,23 +104,18 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
         </div>
       </header>
 
-      {/* Mobile Compact Header (<= 48px to obey 15% aggregate sticky cap) */}
       <header className="lg:hidden sticky top-0 z-30 pt-safe bg-white/95 backdrop-blur-md border-b border-[#E8DFC5]">
         <div className="px-3 min-[380px]:px-4 h-12 flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => onSelectTab('home')}
-            className="flex items-center gap-2 min-h-[44px] whitespace-nowrap shrink-0"
+            className="patchup-wordmark flex items-center min-h-[44px] whitespace-nowrap shrink-0"
           >
             <img
-              src="/assets/aistudio/PatchUp-Logo_18e66d4c.png"
-              alt="PatchUp logo"
-              referrerPolicy="no-referrer"
-              className="w-7 h-7 object-contain"
+              src="/patchup-logo.png"
+              alt="PatchUp"
+              className="patchup-logo patchup-logo-mobile"
             />
-            <span className="font-display text-lg font-extrabold tracking-tight text-[#2D2B35]">
-              PatchUp
-            </span>
           </button>
 
           {user ? (
@@ -156,18 +153,16 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
         </div>
       </header>
 
-      {/* Main Content Workspace */}
-      <main className="flex-1 min-w-0 w-full max-w-7xl mx-auto px-3 min-[380px]:px-4 sm:px-6 py-4 sm:py-8 pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-10">
+      <main className="flex-1 min-w-0 w-full max-w-[1440px] mx-auto px-3 min-[380px]:px-4 sm:px-6 lg:px-8 py-4 sm:py-8 pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-12">
         {children}
       </main>
 
-      {/* Mobile Fixed 5-Tab Bottom Navigation Bar */}
       <nav
         aria-label="Mobile navigation"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E8DFC5] pb-safe px-safe"
+        className="mobile-dock lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E8DFC5] pb-safe px-safe"
       >
         <div className="grid grid-cols-5 items-center h-16 px-1">
-          {NAV_ITEMS.map((item) => {
+          {MOBILE_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             const isCapture = item.id === 'capture';
