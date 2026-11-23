@@ -11,6 +11,7 @@ import { CommunityReportsView } from './views/CommunityReportsView';
 import { MinigamesView } from './views/MinigamesView';
 import { LandingView } from './views/LandingView';
 import { firebaseClientConfigured } from './lib/firebase';
+import { hasPendingCapture } from './lib/pendingCapture';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -68,6 +69,15 @@ function AppExperience() {
     window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
     return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
   }, []);
+
+  // A visitor who started a report on the landing page lands directly in capture
+  // once they sign in, where the stashed photo + location are ingested.
+  useEffect(() => {
+    if (user && hasPendingCapture()) {
+      setSubView('none');
+      setActiveTab('capture');
+    }
+  }, [user]);
 
   const handleSelectTab = (tab: NavTab) => {
     setSubView('none');

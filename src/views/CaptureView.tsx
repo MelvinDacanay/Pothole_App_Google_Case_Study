@@ -31,6 +31,8 @@ import {
   MapsClientConfig,
   SeverityLabel,
 } from '../lib/maps';
+import { consumePendingCapture } from '../lib/pendingCapture';
+import { OfficialReportPanel } from '../components/OfficialReportPanel';
 
 interface CaptureViewProps {
   preselectedPothole: {
@@ -133,6 +135,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const [stateCode, setStateCode] = useState('GA');
   const [postalCode, setPostalCode] = useState('');
   const [placeId, setPlaceId] = useState('');
+  const [jurisdiction, setJurisdiction] = useState<'atldot' | 'gdot' | 'unknown'>('unknown');
   const [notes, setNotes] = useState('');
 
   // Step 3: 25m Duplicate candidates + optional Gemini check
@@ -167,6 +170,28 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   const geocodeSeqRef = useRef(0);
   const candidateSeqRef = useRef(0);
+  const pendingConsumedRef = useRef(false);
+
+  // Ingest a pre-auth landing capture once, as soon as the signed-in view mounts.
+  useEffect(() => {
+    if (pendingConsumedRef.current || !user || preselectedPothole) return;
+    const draft = consumePendingCapture();
+    if (!draft) return;
+    pendingConsumedRef.current = true;
+    void processSelectedFile(
+      draft.file,
+      'file',
+      draft.coords
+        ? {
+            coords: draft.coords,
+            coordinateSource: draft.coordinateSource,
+            locationUserCorrected: draft.locationUserCorrected,
+          }
+        : null
+    );
+    // Runs once on mount for the landing handoff; processSelectedFile is stable enough here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   useEffect(() => {
     loadMapsClientConfig().then(setMapsConfig);
@@ -222,6 +247,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
         setGeocodeSource(data.source);
         setInAtlantaMetro(Boolean(data.inAtlantaMetro));
+        setJurisdiction(data.jurisdiction || 'unknown');
         setNeighborhood(data.neighborhood || '');
         setCity(data.city || 'Atlanta');
         setStateCode(data.state || 'GA');
@@ -349,7 +375,15 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     }
   };
 
-  const processSelectedFile = async (file: File, source: 'camera' | 'file') => {
+  const processSelectedFile = async (
+    file: File,
+    _source: 'camera' | 'file',
+    seededLocation?: {
+      coords: { lat: number; lng: number };
+      coordinateSource: CoordinateSource;
+      locationUserCorrected: boolean;
+    } | null
+  ) => {
     setUploadError(null);
     setSubmittedResult(null);
 
@@ -366,7 +400,15 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       setExifCoordsFound(exifGps);
       setClassificationAppealed(false);
 
-      if (exifGps && !preselectedPothole && !coords) {
+      if (seededLocation) {
+        // Location the visitor already confirmed on the landing page — honor it
+        // as-is rather than re-deriving from EXIF or device GPS.
+        setCoords(seededLocation.coords);
+        setCoordinateSource(seededLocation.coordinateSource);
+        setAccuracyMeters(undefined);
+        setLocationUserCorrected(seededLocation.locationUserCorrected);
+        setGpsStatusMsg('Using the location you set before signing in. Drag the pin to refine.');
+      } else if (exifGps && !preselectedPothole && !coords) {
         setCoords(exifGps);
         setCoordinateSource('exif_extracted');
         setAccuracyMeters(undefined);
@@ -636,7 +678,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   if (submittedResult) {
     return (
-      <div className="city-page city-capture capture-success max-w-2xl mx-auto bg-white rounded-2xl border border-[#E8DFC5] p-6 sm:p-8 space-y-5">
+      <div className="city-page city-capture capture-success max-w-2xl mx-auto space-y-5">
+        <div className="bg-white rounded-2xl border border-[#E8DFC5] p-6 sm:p-8 space-y-5">
         <div className="flex items-start gap-3">
           <CheckCircle2 className="w-8 h-8 text-[#4CB729] shrink-0" />
           <div>
@@ -700,6 +743,29 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
             <span>Capture Another</span>
           </button>
         </div>
+        </div>
+
+        {submittedResult.duplicateStatus === 'distinct' && mediaId && streetName.trim() && (
+          <OfficialReportPanel
+            input={{
+              potholeId: submittedResult.potholeId,
+              streetName: streetName.trim(),
+              formattedAddress: formattedAddress.trim() || streetName.trim(),
+              lat: submittedResult.coords.lat,
+              lng: submittedResult.coords.lng,
+              jurisdiction,
+              agencyName:
+                jurisdiction === 'gdot'
+                  ? 'Georgia Department of Transportation (GDOT)'
+                  : 'City of Atlanta — ATL311',
+              severityLabel: aiResult.severityLabel,
+              coordinateSource,
+              notes: notes.trim() || undefined,
+              reportedAtISO: new Date().toISOString(),
+              photoUrl: `/api/media/${mediaId}`,
+            }}
+          />
+        )}
       </div>
     );
   }

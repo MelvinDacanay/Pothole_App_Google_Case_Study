@@ -184,6 +184,27 @@ pre {
   text-transform: uppercase;
   letter-spacing: .05em;
 }
+.landing-report-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .6rem 1.25rem;
+  border: 2px solid #2D2B35;
+  border-radius: 999px;
+  background: #e7421e;
+  color: #fff;
+  font: 700 var(--text-editorial-sm)/1.15 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 #2D2B35;
+  transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+}
+.landing-report-btn:hover { background: #ff5833; transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #2D2B35; }
+.landing-report-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #2D2B35; }
+.landing-report-btn:focus-visible { outline: 3px solid #e7421e; outline-offset: 3px; }
 .landing-auth-error {
   margin: 0;
   padding: .7rem .8rem;

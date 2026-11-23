@@ -1118,6 +1118,214 @@ async function startServer() {
     }
   });
 
+  // --- Phase 4: per-user official ATL311 / GDOT case tracking ---
+  // Records a user's effort to get THEIR captured pothole fixed through an
+  // official channel. All writes go through the Admin SDK here (Firestore rules
+  // deny client writes). The official agency case number lives only in
+  // externalCaseRef and is set solely from a value the user manually confirms —
+  // never fabricated, never auto-advanced.
+  app.post('/api/cases/log', async (req, res) => {
+    const decoded = await verifyBearerToken(req, res, true);
+    if (!decoded) return;
+
+    const serverDb = getServerFirestore();
+    if (!serverDb || !adminFirestoreReady) {
+      res.status(503).json({ error: 'Server Firestore database unavailable.' });
+      return;
+    }
+
+    const body = req.body ?? {};
+    const potholeId = typeof body.potholeId === 'string' ? body.potholeId.trim() : '';
+    if (!SAFE_ID_REGEX.test(potholeId)) {
+      res.status(400).json({ error: 'Valid potholeId is required.' });
+      return;
+    }
+
+    const ALLOWED_CHANNELS = new Set(['atl311', 'gdot', 'email', 'other']);
+    const ALLOWED_METHODS = new Set(['official_portal', 'phone', 'email']);
+    const ALLOWED_CASE_STATUSES = new Set([
+      'drafted',
+      'submitted_unconfirmed',
+      'case_logged',
+      'acknowledged',
+      'resolved',
+      'reopened',
+    ]);
+
+    const channel = ALLOWED_CHANNELS.has(String(body.channel)) ? String(body.channel) : '';
+    const reportMethod = ALLOWED_METHODS.has(String(body.reportMethod))
+      ? String(body.reportMethod)
+      : '';
+    const externalCaseRef =
+      typeof body.externalCaseRef === 'string'
+        ? body.externalCaseRef.replace(/[^\w\s#/\-.]/g, '').trim().slice(0, 64)
+        : '';
+    const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 400) : '';
+    let requestedStatus = ALLOWED_CASE_STATUSES.has(String(body.status))
+      ? String(body.status)
+      : '';
+    // A confirmed external case number always implies at least "case_logged".
+    if (externalCaseRef && (!requestedStatus || requestedStatus === 'drafted' || requestedStatus === 'submitted_unconfirmed')) {
+      requestedStatus = 'case_logged';
+    }
+
+    try {
+      const potholeSnap = await serverDb.collection('potholes').doc(potholeId).get();
+      if (!potholeSnap.exists) {
+        res.status(404).json({ error: 'Pothole record not found.' });
+        return;
+      }
+      const pothole = potholeSnap.data()!;
+      if (pothole.primaryContributorUid !== decoded.uid) {
+        res.status(403).json({
+          error: 'You can only track official cases for potholes you reported.',
+        });
+        return;
+      }
+
+      const existingSnap = await serverDb
+        .collection('potholeCases')
+        .where('userId', '==', decoded.uid)
+        .where('potholeId', '==', potholeId)
+        .limit(1)
+        .get();
+
+      const nowMillis = Date.now();
+      const event = {
+        type: externalCaseRef
+          ? 'case_ref_logged'
+          : requestedStatus === 'submitted_unconfirmed'
+            ? 'marked_submitted'
+            : 'draft_saved',
+        ...(notes ? { note: notes } : {}),
+        ...(externalCaseRef ? { externalCaseRef } : {}),
+        atMillis: nowMillis,
+      };
+
+      if (existingSnap.empty) {
+        const caseId = `cas_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const status = requestedStatus || 'drafted';
+        const caseDoc: Record<string, unknown> = {
+          caseId,
+          userId: decoded.uid,
+          potholeId,
+          streetName: String(pothole.streetName || 'Unverified Street'),
+          formattedAddress: String(pothole.formattedAddress || ''),
+          lat: Number(pothole.lat),
+          lng: Number(pothole.lng),
+          jurisdiction: String(pothole.jurisdiction || 'unknown'),
+          channel: channel || (pothole.jurisdiction === 'gdot' ? 'gdot' : 'atl311'),
+          ...(reportMethod ? { reportMethod } : {}),
+          status,
+          ...(externalCaseRef ? { externalCaseRef } : {}),
+          ...(pothole.primaryPhotoUrl ? { primaryPhotoUrl: String(pothole.primaryPhotoUrl) } : {}),
+          ...(pothole.primaryMediaId ? { primaryMediaId: String(pothole.primaryMediaId) } : {}),
+          ...(notes ? { notes } : {}),
+          events: [event],
+          ...(status === 'submitted_unconfirmed' || status === 'case_logged'
+            ? { submittedAt: FieldValue.serverTimestamp() }
+            : {}),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        };
+        await serverDb.collection('potholeCases').doc(caseId).set(caseDoc);
+        res.status(201).json({ ok: true, caseId });
+        return;
+      }
+
+      const existingDoc = existingSnap.docs[0];
+      const existing = existingDoc.data();
+      const prevStatus = String(existing.status || 'drafted');
+      // Never regress a case to an earlier stage via a stray request.
+      const STAGE: Record<string, number> = {
+        drafted: 0,
+        submitted_unconfirmed: 1,
+        case_logged: 2,
+        acknowledged: 3,
+        resolved: 4,
+        reopened: 1,
+      };
+      const nextStatus =
+        requestedStatus && STAGE[requestedStatus] >= STAGE[prevStatus] ? requestedStatus : prevStatus;
+
+      const update: Record<string, unknown> = {
+        status: nextStatus,
+        events: FieldValue.arrayUnion(event),
+        updatedAt: FieldValue.serverTimestamp(),
+        ...(channel ? { channel } : {}),
+        ...(reportMethod ? { reportMethod } : {}),
+        ...(externalCaseRef ? { externalCaseRef } : {}),
+        ...(notes ? { notes } : {}),
+      };
+      if (
+        !existing.submittedAt &&
+        (nextStatus === 'submitted_unconfirmed' || nextStatus === 'case_logged')
+      ) {
+        update.submittedAt = FieldValue.serverTimestamp();
+      }
+      await existingDoc.ref.update(update);
+      res.json({ ok: true, caseId: String(existing.caseId || existingDoc.id) });
+    } catch (err) {
+      res.status(500).json({
+        error: 'Unable to log official case.',
+        detail: err instanceof Error ? err.message : 'Case write failed',
+      });
+    }
+  });
+
+  app.get('/api/cases/mine', async (req, res) => {
+    const decoded = await verifyBearerToken(req, res, false);
+    if (!decoded) return;
+
+    const serverDb = getServerFirestore();
+    if (!serverDb || !adminFirestoreReady) {
+      res.status(503).json({ error: 'Server Firestore database unavailable.' });
+      return;
+    }
+
+    try {
+      const snap = await serverDb
+        .collection('potholeCases')
+        .where('userId', '==', decoded.uid)
+        .limit(100)
+        .get();
+
+      const cases = snap.docs.map((d) => d.data());
+
+      // Enrich with the live pothole status so "My Cases" reflects reality
+      // (e.g. an admin-confirmed repair) without duplicating it onto the case.
+      const potholeIds = Array.from(
+        new Set(cases.map((c) => String(c.potholeId)).filter(Boolean))
+      );
+      const statusByPothole = new Map<string, string>();
+      if (potholeIds.length > 0) {
+        const refs = potholeIds.map((id) => serverDb.collection('potholes').doc(id));
+        const potholeSnaps = await serverDb.getAll(...refs);
+        for (const ps of potholeSnaps) {
+          if (ps.exists) statusByPothole.set(ps.id, String(ps.data()?.status || ''));
+        }
+      }
+
+      const enriched = cases
+        .map((c): Record<string, unknown> => ({
+          ...c,
+          potholeStatus: statusByPothole.get(String(c.potholeId)) || undefined,
+        }))
+        .sort((a, b) => {
+          const aMs = (a.updatedAt as Timestamp | undefined)?.toMillis?.() ?? 0;
+          const bMs = (b.updatedAt as Timestamp | undefined)?.toMillis?.() ?? 0;
+          return bMs - aMs;
+        });
+
+      res.json({ cases: enriched });
+    } catch (err) {
+      res.status(500).json({
+        error: 'Unable to load your cases.',
+        detail: err instanceof Error ? err.message : 'Case query failed',
+      });
+    }
+  });
+
   app.get('/api/media/:mediaId', async (req, res) => {
     const { mediaId } = req.params;
     if (!SAFE_ID_REGEX.test(mediaId)) {
