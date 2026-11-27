@@ -27,7 +27,7 @@ test('real local Firestore emulator: concurrent manual approvals and exact-image
     await db.collection('users').doc(uid).set({ username: 'tester', displayName: 'Tester', distinctPotholeCount: 0, evidenceCount: 0, potholesCollectedCount: 0 });
     await db.collection('mediaObjects').doc(mediaId).set({ ownerId: uid, contentType: 'image/jpeg', data: fixture });
     const v = await verifyImage(db, { uid, mediaId, bytes: fixture, mime: 'image/jpeg', consent: false });
-    const p: SubmissionInput = { uid, mediaId, submissionId, verificationId: v.verificationId, requestedAction: 'provisional_review', actionType: 'provisional_review', targetPotholeId: '', lat: 33.75, lng: -84.39, coordinateSource: 'manual_pin', formattedAddress: 'Example St', streetName: 'Example St', normalizedStreet: 'example st', neighborhood: '', city: 'Atlanta', state: 'GA', postalCode: '', placeId: '', jurisdiction: 'atldot', locationUserCorrected: false, notes: '', duplicateConfidence: 0, candidatePotholeIds: [] };
+    const p: SubmissionInput = { uid, mediaId, submissionId, verificationId: v.verificationId, requestedAction: 'provisional_review', actionType: 'provisional_review', targetPotholeId: '', lat: 33.75, lng: -84.39, coordinateSource: 'manual_pin', streetSource:'user_observed', formattedAddress: 'Example St', streetName: 'Example St', normalizedStreet: 'example st', neighborhood: '', city: 'Atlanta', state: 'GA', postalCode: '', placeId: '', jurisdiction: 'atldot', locationUserCorrected: false, notes: '', duplicateConfidence: 0, candidatePotholeIds: [] };
     const a = await commitVerifiedSubmission(db, p);
     assert.equal(a.duplicateStatus, 'pending_review');
     const outcomes = await Promise.all([

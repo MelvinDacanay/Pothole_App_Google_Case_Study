@@ -1,3 +1,4 @@
+import { LOCATION_POLICY_VERSION, isIndependentRecord, requireIndependentSource } from './locationPolicy.ts';
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { haversineMeters, isValidCoordinatePair, isWithinAtlantaMetro, type JurisdictionType } from './geo.ts';
 import { mediaBinding } from './mediaStore.ts';
@@ -8,7 +9,7 @@ export interface SubmissionInput {
   uid:string; submissionId:string; mediaId:string; verificationId:string; requestedAction:string; targetPotholeId:string;
   lat:number;lng:number;actionType:string;coordinateSource:string;accuracyMeters?:number;formattedAddress:string;
   streetName:string;normalizedStreet:string;neighborhood:string;city:string;state:string;postalCode:string;placeId:string;
-  jurisdiction:JurisdictionType;locationUserCorrected:boolean;streetSource?:'city_centerline'|'user_observed'|'google_geocoding'|'legacy';notes:string;duplicateConfidence:number;candidatePotholeIds:string[];
+  jurisdiction:JurisdictionType;locationUserCorrected:boolean;streetSource?:'city_centerline'|'tiger_line'|'user_observed'|'google_geocoding'|'legacy';notes:string;duplicateConfidence:number;candidatePotholeIds:string[];
 }
 // Caller authenticates and validates input; this function owns all database authorization and atomic mutations.
 export async function commitVerifiedSubmission(serverDb:Firestore,p:SubmissionInput) {
@@ -28,6 +29,7 @@ export async function commitVerifiedSubmission(serverDb:Firestore,p:SubmissionIn
           };
         }
 
+        requireIndependentSource(p.streetSource);
         const mediaRef = serverDb.collection('mediaObjects').doc(mediaId);
         const mediaSnap = await tx.get(mediaRef);
         if (!mediaSnap.exists) {
@@ -78,7 +80,7 @@ export async function commitVerifiedSubmission(serverDb:Firestore,p:SubmissionIn
             : undefined;
 
         const photoUrl = `/api/media/${mediaId}`;
-        const provenance={streetSource:p.streetSource||'legacy'};
+        const provenance={streetSource:p.streetSource,locationPolicyVersion:LOCATION_POLICY_VERSION};
 
         if (actionType === 'add_evidence') {
           const targetRef = serverDb.collection('potholes').doc(targetPotholeId);
@@ -262,6 +264,7 @@ export async function commitPendingReview(serverDb:Firestore,actor:{uid:string;e
           tx.create(audit,{eventId:audit.id,actorUid:actor.uid,actorEmail:String(actor.email||''),action:'submission_review',targetType:'pothole',targetId:subData.potholeId,reason:reason.slice(0,400),afterSummary:'reject',createdAt:FieldValue.serverTimestamp()});
           return {alreadyResolved:false,duplicateStatus:'rejected',potholeId:subData.potholeId};
         }
+        if(!isIndependentRecord(subData))throw new Error('Review requires independently sourced location.');
         const contributorRef = serverDb.collection('users').doc(String(subData.userId));
         const [contributorSnap, provisionalSnap, mediaSnap] = await Promise.all([tx.get(contributorRef),tx.get(provisionalPotholeRef),tx.get(serverDb.collection('mediaObjects').doc(String(subData.mediaId)))]);
         if(!provisionalSnap.exists || provisionalSnap.data()?.status!=='provisional' || !mediaSnap.exists || mediaSnap.data()?.ownerId!==subData.userId) throw new Error('Pending photo or pothole is no longer available.');

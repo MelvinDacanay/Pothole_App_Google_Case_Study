@@ -5,14 +5,14 @@ const c=(type:string,longText:string,shortText=longText)=>({types:[type],longTex
 const r=(street:string)=>({types:['street_address'],formattedAddress:`100 ${street}, Atlanta, GA`,placeId:'example',addressComponents:[c('route',street),c('country','United States','US'),c('administrative_area_level_1','Georgia','GA'),c('locality','Atlanta')]});
 test('v4 parses a Georgia road and address',()=>{const result=parseGoogleStreet({results:[r('Peachtree St NE')]});assert.equal(result?.streetName,'Peachtree St NE');assert.equal(result?.formattedAddress,'100 Peachtree St NE, Atlanta, GA');});
 test('conflicting roads and missing results do not invent a street',()=>{assert.equal(parseGoogleStreet({results:[r('Peachtree St NE'),r('Spring St NW')]}),null);assert.equal(parseGoogleStreet({results:[]}),null);assert.equal(parseGoogleStreet({results:[null]}),null);});
-test('live calls require explicit permission and Cloud Run',()=>{assert.equal(googleGeocodingEnabled({}),false);const env={K_SERVICE:'patchup',PATCHUP_GOOGLE_GEOCODING_ENABLED:'true',PATCHUP_GOOGLE_GEOCODING_STORAGE_APPROVED:'true'};assert.equal(googleGeocodingEnabled(env),true);assert.equal(googleGeocodingEnabled({...env,FIRESTORE_EMULATOR_HOST:'localhost'}),false);});
+test('live calls require explicit permission and Cloud Run',()=>{assert.equal(googleGeocodingEnabled({}),false);const env={K_SERVICE:'patchup',PATCHUP_GOOGLE_GEOCODING_ENABLED:'true',PATCHUP_GOOGLE_GEOCODING_PREVIEW_APPROVED:'true'};assert.equal(googleGeocodingEnabled(env),true);assert.equal(googleGeocodingEnabled({...env,FIRESTORE_EMULATOR_HOST:'localhost'}),false);});
 test('global quotas are shared and user quotas isolated',()=>{const now=Date.UTC(2026,10,27,12,0);const a=quotaWindows('a',now),b=quotaWindows('b',now);assert.deepEqual(a.slice(0,3),b.slice(0,3));assert.notEqual(a[3].id,b[3].id);assert.deepEqual(a.map(x=>x.max),[100,3000,20,5,25]);});
 
 test('provider attempts reserve all counters before the only Google request; quota fails closed', async()=>{
   const {lookupGoogleStreet}=await import('../server/googleGeocoding.ts');
-  const keys=['K_SERVICE','PATCHUP_GOOGLE_GEOCODING_ENABLED','PATCHUP_GOOGLE_GEOCODING_STORAGE_APPROVED','FIRESTORE_EMULATOR_HOST'] as const;
+  const keys=['K_SERVICE','PATCHUP_GOOGLE_GEOCODING_ENABLED','PATCHUP_GOOGLE_GEOCODING_PREVIEW_APPROVED','FIRESTORE_EMULATOR_HOST'] as const;
   const old=keys.map(k=>process.env[k]);
-  process.env.K_SERVICE='patchup';process.env.PATCHUP_GOOGLE_GEOCODING_ENABLED='true';process.env.PATCHUP_GOOGLE_GEOCODING_STORAGE_APPROVED='true';delete process.env.FIRESTORE_EMULATOR_HOST;
+  process.env.K_SERVICE='patchup';process.env.PATCHUP_GOOGLE_GEOCODING_ENABLED='true';process.env.PATCHUP_GOOGLE_GEOCODING_PREVIEW_APPROVED='true';delete process.env.FIRESTORE_EMULATOR_HOST;
   try {
     let count=0,sets=0,calls=0;
     const db={collection:()=>({doc:(id:string)=>id}),runTransaction:async(fn:(tx:unknown)=>Promise<boolean>)=>fn({get:async()=>({exists:true,data:()=>({count})}),set:()=>{sets++;}})};

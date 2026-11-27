@@ -2,10 +2,10 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { normalizeStreetName, isWithinAtlantaMetro } from './geo.ts';
 import { createHash } from 'node:crypto';
 
-// Google content may only be persisted where the project's agreement permits it.
+// Google content is transient, user-specific preview only. Never persist the response.
 export function googleGeocodingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.PATCHUP_GOOGLE_GEOCODING_ENABLED === 'true' &&
-    env.PATCHUP_GOOGLE_GEOCODING_STORAGE_APPROVED === 'true' && Boolean(env.K_SERVICE) && !env.FIRESTORE_EMULATOR_HOST;
+    env.PATCHUP_GOOGLE_GEOCODING_PREVIEW_APPROVED === 'true' && Boolean(env.K_SERVICE) && !env.FIRESTORE_EMULATOR_HOST;
 }
 export type GoogleStreet = { streetName: string; formattedAddress: string; city: string; state: string; postalCode: string; placeId: string };
 type Component = { types?: string[]; longText?: string; shortText?: string };

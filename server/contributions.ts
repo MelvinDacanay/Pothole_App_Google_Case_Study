@@ -1,3 +1,4 @@
+import { isIndependentRecord, reportsEnabled } from './locationPolicy.ts';
 import { hashBytes } from './verificationPolicy.ts';
 import { FieldValue, type Firestore, type Transaction, type DocumentData } from 'firebase-admin/firestore';
 import { getCurrentWeekKey, getCurrentMonthKey, evaluateUserAchievements, createNotification } from './social.ts';
@@ -32,7 +33,7 @@ export async function finishContribution(db:Firestore,submissionId:string) {
   const [sub,pot]=await Promise.all([db.collection('submissions').doc(submissionId).get(),db.collection('potholes').doc(String(e.potholeId)).get()]);
   if(!['distinct','evidence_added'].includes(String(sub.data()?.duplicateStatus))||!['accepted','reported','acknowledged','repaired'].includes(String(pot.data()?.status))) {await ref.update({status:'cancelled'});return null;}
   if(e.status==='cancelled') return null;
-  const segment=e.distinct?await evaluateSegmentMembershipAndThreshold(db,String(e.potholeId)):null;
+  const segment=e.distinct&&reportsEnabled()&&isIndependentRecord(pot.data())?await evaluateSegmentMembershipAndThreshold(db,String(e.potholeId)):null;
   await evaluateUserAchievements(db,String(e.ownerId),true);
   if(e.distinct&&[5,15,30,75].includes(Number(e.totalDistinct))) await createNotification(db,{uid:String(e.ownerId),notificationId:`milestone_${submissionId}`.slice(0,128),type:'leaderboard_milestone',title:`${e.totalDistinct} Distinct Atlanta Potholes`,body:`You have documented ${e.totalDistinct} accepted distinct potholes.`,relatedId:String(e.potholeId)});
   await ref.update({status:'completed',completedAt:FieldValue.serverTimestamp()});return segment;

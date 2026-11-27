@@ -32,8 +32,12 @@ spec:
           value: 'false'
         - name: PATCHUP_GOOGLE_GEOCODING_ENABLED
           value: 'false'
-        - name: PATCHUP_GOOGLE_GEOCODING_STORAGE_APPROVED
+        - name: PATCHUP_GOOGLE_GEOCODING_PREVIEW_APPROVED
           value: 'false'
+        - name: PATCHUP_CITY_ROADS_REUSE_APPROVED
+          value: "false"
+        - name: PATCHUP_LOCATION_HISTORY_AUDITED
+          value: "false"
         - name: PATCHUP_CITY_ROADS_ENABLED
           value: 'false'
         - name: PATCHUP_EMAIL_SENDING_ENABLED
