@@ -49,7 +49,7 @@ export function adminActivityLabel(action?: string, after?: string): string {
   switch (action) {
     case 'submission_review':
       return after === 'confirm_distinct' ? 'Photo approved' : after === 'reject' ? 'Photo rejected' : after === 'merge_evidence' ? 'Additional photo accepted' : 'Photo reviewed';
-    case 'pothole_review': return after?.startsWith('status=repaired,') ? 'Repair confirmed' : 'Pothole details updated';
+    case 'pothole_review': return /^status=repaired(?:,|$)/.test(after||'') ? 'Repair confirmed' : 'Pothole details updated';
     case 'report_status_transition': {
       const status = /^status=([a-z_]+)/.exec(after || '')?.[1];
       return status === 'submitted' ? 'Report submission recorded' : status === 'acknowledged' ? 'Agency response recorded' : status === 'resolved' ? 'Agency case resolved' : status === 'ready_for_submission' ? 'Report marked ready' : status === 'unable_to_submit' ? 'Report could not be submitted' : status === 'closed' ? 'Report closed' : 'Report updated';

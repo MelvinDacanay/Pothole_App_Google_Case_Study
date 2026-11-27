@@ -9,13 +9,10 @@ import {
   JURISDICTION_LABELS,
   loadMapsClientConfig,
   MapsClientConfig,
-  POTHOLE_STATUS_LABELS,
   PotholeRecord,
   PotholeSubmission,
 } from '../lib/maps';
 import { AtlantaMap } from '../components/AtlantaMap';
-
-type MapFilter = 'all' | 'accepted' | 'repaired';
 
 interface MapViewProps {
   selectedPothole: PotholeRecord | null;
@@ -43,7 +40,6 @@ export const MapView: React.FC<MapViewProps> = ({
     apiKey: '',
     mapId: 'DEMO_MAP_ID',
   });
-  const [statusFilter, setStatusFilter] = useState<MapFilter>('all');
   const [onlyMine, setOnlyMine] = useState(false);
   const [evidenceItems, setEvidenceItems] = useState<PotholeSubmission[]>([]);
   const [loadingEvidence, setLoadingEvidence] = useState(false);
@@ -92,11 +88,9 @@ export const MapView: React.FC<MapViewProps> = ({
   const filteredPotholes = useMemo(() => {
     return potholes.filter((p) => {
       if (onlyMine && user && !myIds.has(p.potholeId)) return false;
-      if (statusFilter === 'all') return true;
-      if(statusFilter==='accepted')return ['accepted','reported','acknowledged'].includes(p.status);
-      return p.status === statusFilter;
+      return true;
     });
-  }, [potholes, statusFilter, onlyMine, myIds, user]);
+  }, [potholes, onlyMine, myIds, user]);
 
   const focusCoords = selectedPothole
     ? { lat: selectedPothole.lat, lng: selectedPothole.lng }
@@ -126,27 +120,6 @@ export const MapView: React.FC<MapViewProps> = ({
         </div>
 
         <div className="min-w-0 flex flex-wrap items-center gap-2">
-          <div className="scrollbar-none w-full sm:w-auto inline-flex items-center gap-1 p-1 bg-[#F7F7F8] border border-[#E8DFC5] rounded-xl overflow-x-auto">
-            {(['all', 'accepted', 'repaired'] as const).map((filterKey) => (
-              <button
-                key={filterKey}
-                type="button"
-                onClick={() => setStatusFilter(filterKey)}
-                className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 ${
-                  statusFilter === filterKey
-                    ? 'bg-white text-[#2D2B35] shadow-xs'
-                    : 'text-[#6E6978] hover:text-[#2D2B35]'
-                }`}
-              >
-                {filterKey === 'all'
-                  ? 'All'
-                  : filterKey === 'accepted'
-                    ? 'Accepted'
-                    : 'Repaired'}
-              </button>
-            ))}
-          </div>
-
           {user && (
             <>
               <button
@@ -194,7 +167,6 @@ export const MapView: React.FC<MapViewProps> = ({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-xs font-medium text-[#6E6978]">
-                  {POTHOLE_STATUS_LABELS[selectedPothole.status] ?? selectedPothole.status} ·{' '}
                   {COORDINATE_SOURCE_LABELS[selectedPothole.coordinateSource]}
                 </div>
                 <h2 className="font-display text-lg font-bold text-[#2D2B35] mt-0.5 break-words">
@@ -337,7 +309,7 @@ export const MapView: React.FC<MapViewProps> = ({
                 <div className="min-w-0">
                   <div className="text-xs font-bold text-[#2D2B35] truncate">{p.streetName}</div>
                   <div className="text-[11px] text-[#6E6978] truncate">
-                    {POTHOLE_STATUS_LABELS[p.status] ?? p.status} · {p.evidenceCount} evidence
+                    {p.evidenceCount} evidence
                   </div>
                 </div>
               </button>

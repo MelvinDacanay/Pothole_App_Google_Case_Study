@@ -1,18 +1,11 @@
-import { isIndependentRecord, reportsEnabled } from './locationPolicy.ts';
+import { isIndependentRecord, reportsEnabled, isNewReportGroup, NEW_REPORT_GROUP_VERSION } from './locationPolicy.ts';
 import { FieldValue, type Firestore, type Timestamp } from 'firebase-admin/firestore';
-import { getAuth } from 'firebase-admin/auth';
-import { getAllowedAdminEmails, isAllowedAdminAccount, normalizeEmail } from './adminAuthorization.ts';
 import {
   haversineMeters,
   isWithinAtlantaMetro,
   normalizeStreetName,
   type JurisdictionType,
 } from './geo.ts';
-import {
-  createActivityFeedEvent,
-  createNotification,
-  evaluateUserAchievements,
-} from './social.ts';
 
 export type SegmentConfidence = 'verified' | 'provisional' | 'needs_review';
 export type ReportStatus =
@@ -137,6 +130,7 @@ export async function writeAdminAudit(
   const eventId = `aud_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   await db.collection('adminAudit').doc(eventId).set({
     eventId,
+    auditPolicyVersion: 'admin-history-v2',
     actorUid: params.actor.uid.slice(0, 128),
     actorEmail: params.actor.email.slice(0, 254),
     action: params.action.slice(0, 96),
@@ -168,7 +162,7 @@ export async function resolveOrCreateStreetSegment(
 ): Promise<{ segmentId: string; confidence: SegmentConfidence }> {
   if (pothole.segmentId) {
     const existingSegSnap = await db.collection('streetSegments').doc(pothole.segmentId).get();
-    if (existingSegSnap.exists && existingSegSnap.data()?.status === 'active') {
+    if (existingSegSnap.exists && existingSegSnap.data()?.status === 'active' && isNewReportGroup(existingSegSnap.data())) {
       return {
         segmentId: existingSegSnap.id,
         confidence: (existingSegSnap.data()!.confidence as SegmentConfidence) || 'needs_review',
@@ -200,7 +194,7 @@ export async function resolveOrCreateStreetSegment(
 
   for (const docSnap of candidatesSnap.docs) {
     const seg = docSnap.data();
-    if (seg.status !== 'active') continue;
+    if (seg.status !== 'active' || !isNewReportGroup(seg)) continue;
     if (seg.jurisdiction !== pothole.jurisdiction) continue;
 
     const anchorDist = haversineMeters(
@@ -275,11 +269,12 @@ export async function resolveOrCreateStreetSegment(
     return { segmentId: matchedSeg.id, confidence: segConfidence };
   }
 
-  const segmentId = makeSegmentSlug(cleanNormalized, pothole.lat, pothole.lng);
+  const segmentId = `v2_${makeSegmentSlug(cleanNormalized, pothole.lat, pothole.lng)}`;
   const cleanStreet = pothole.streetName.replace(/^\d+[a-z]?\s+/i, '').trim() || pothole.streetName;
   const corridorLabel = buildBlockRangeLabel(cleanStreet, blockNum, blockNum).slice(0, 160);
 
-  await db.collection('streetSegments').doc(segmentId).set({
+  await db.collection('streetSegments').doc(segmentId).create({
+    reportGroupVersion: NEW_REPORT_GROUP_VERSION,
     segmentId,
     streetName: cleanStreet.slice(0, 128),
     normalizedStreet: cleanNormalized.slice(0, 128),
@@ -328,7 +323,7 @@ export async function evaluateSegmentMembershipAndThreshold(
     throw new Error('Pothole record not found for segment evaluation.');
   }
   const initialPothole = potholeSnap.data()!;
-  if(!reportsEnabled()||!isIndependentRecord(initialPothole))throw new Error('Independent location history audit required.');
+  if(!isIndependentRecord(initialPothole))throw new Error('Independent location required.');
 
   const { segmentId } = await resolveOrCreateStreetSegment(db, {
     potholeId,
@@ -364,6 +359,7 @@ export async function evaluateSegmentMembershipAndThreshold(
     const pot = potDoc.data()!;
     if(!isIndependentRecord(pot))throw new Error('Independent location required.');
     const seg = segDoc.data()!;
+    if (!isNewReportGroup(seg) || normalizeStreetName(String(pot.streetName||''))!==normalizeStreetName(String(seg.streetName||''))) throw new Error('Street report requires a verified grouping.');
     const cycleNumber = Number(seg.currentCycleNumber || 1);
     const deterministicReportId = `rep_${segmentId}_c${cycleNumber}`;
     const activeReportId =
@@ -483,7 +479,7 @@ export async function evaluateSegmentMembershipAndThreshold(
       const snapshotPotRefs = snapshotIds.map((id) => db.collection('potholes').doc(id));
       const snapshotPotDocs =
         snapshotPotRefs.length > 0 ? await tx.getAll(...snapshotPotRefs) : [];
-      if(snapshotPotDocs.some(d=>!d.exists||!isIndependentRecord(d.data())))throw new Error('Report snapshot contains an unverified location.');
+      if(snapshotPotDocs.some(d=>!d.exists||!isIndependentRecord(d.data())||d.data()?.segmentId!==segmentId||!ACTIVE_CYCLE_POTHOLE_STATUSES.has(String(d.data()?.status))||normalizeStreetName(String(d.data()?.streetName||''))!==normalizeStreetName(String(seg.streetName||''))))throw new Error('Report snapshot contains an unverified location.');
 
       tx.set(memberRef, {
         potholeId,
@@ -516,6 +512,7 @@ export async function evaluateSegmentMembershipAndThreshold(
       const centerLng = validCount > 0 ? Number((sumLng / validCount).toFixed(6)) : Number(seg.anchorLng);
 
       tx.set(existingReportRef, {
+        reportGroupVersion: NEW_REPORT_GROUP_VERSION,
         reportId: deterministicReportId,
         segmentId,
         cycleNumber,
@@ -580,33 +577,6 @@ export async function evaluateSegmentMembershipAndThreshold(
     };
   });
 
-  if (txResult.reportCreated && txResult.reportId) {
-    const adminsSnap = await db.collection('admins').limit(10).get();
-    const allowlist = getAllowedAdminEmails();
-    const candidates = adminsSnap.docs.filter(d => allowlist.has(normalizeEmail(d.data().email)));
-    const checked = await Promise.all(candidates.map(async d => {
-      try {
-        const account = await getAuth().getUser(d.id);
-        return isAllowedAdminAccount(account, allowlist) && normalizeEmail(account.email) === normalizeEmail(d.data().email) ? d.id : null;
-      } catch { return null; }
-    }));
-    const adminUids = checked.filter((uid): uid is string => uid !== null);
-    const allTargets = Array.from(new Set([...txResult.notifyUids, ...adminUids]));
-
-    await Promise.all(
-      allTargets.map((uid) =>
-        createNotification(db, {
-          uid,
-          notificationId: `thresh_${txResult.reportId}_${uid}`.slice(0, 128),
-          type: 'segment_threshold',
-          title: '5-Pothole Street Report Triggered',
-          body: `${txResult.corridorLabel} reached ${txResult.currentCycleDistinctCount} distinct potholes and entered admin review.`,
-          relatedId: txResult.reportId!,
-        }).catch(() => {})
-      )
-    );
-  }
-
   return {
     segmentId: txResult.segmentId,
     cycleNumber: txResult.cycleNumber,
@@ -632,6 +602,7 @@ export async function recountSegmentTransactionally(
       throw new Error('Street segment not found.');
     }
     const seg = segSnap.data()!;
+    if (!isNewReportGroup(seg) && !reportsEnabled()) throw new Error('Older street report needs location verification.');
     const cycleNumber = Number(seg.currentCycleNumber || 1);
     const activeReportId =
       typeof seg.activeReportId === 'string' && seg.activeReportId ? seg.activeReportId : null;
@@ -667,7 +638,7 @@ export async function recountSegmentTransactionally(
       const pLat = Number(p.lat);
       const pLng = Number(p.lng);
 
-      if (!ACCEPTED_HISTORICAL_STATUSES.has(status)) {
+      if (!ACCEPTED_HISTORICAL_STATUSES.has(status) || !isIndependentRecord(p) || normalizeStreetName(String(p.streetName||''))!==normalizeStreetName(String(seg.streetName||''))) {
         if (existingMember) {
           tx.delete(segRef.collection('acceptedPotholes').doc(pDoc.id));
         }
@@ -753,6 +724,7 @@ export async function recountSegmentTransactionally(
       const centerLng = Number((sumLng / activeCycleIds.length).toFixed(6));
 
       tx.set(reportRef, {
+        ...(isNewReportGroup(seg) ? {reportGroupVersion: NEW_REPORT_GROUP_VERSION} : {}),
         reportId: deterministicReportId,
         segmentId,
         cycleNumber,
@@ -796,21 +768,6 @@ export async function recountSegmentTransactionally(
     };
   });
 
-  if (result.reportCreated && result.reportId) {
-    await Promise.all(
-      result.notifyUids.map((uid) =>
-        createNotification(db, {
-          uid,
-          notificationId: `thresh_${result.reportId}_${uid}`.slice(0, 128),
-          type: 'segment_threshold',
-          title: '5-Pothole Street Report Triggered',
-          body: `${result.corridorLabel} reached ${result.currentCycleDistinctCount} distinct potholes and entered admin review.`,
-          relatedId: result.reportId!,
-        }).catch(() => {})
-      )
-    );
-  }
-
   return {
     distinctAcceptedCount: result.distinctAcceptedCount,
     currentCycleDistinctCount: result.currentCycleDistinctCount,
@@ -843,7 +800,8 @@ export async function adminReviewPothole(
     throw new Error('Pothole record not found.');
   }
   const prev = potSnap.data()!;
-  if(!isIndependentRecord(prev))throw new Error('Independent location provenance required before review.');
+  const independent = isIndependentRecord(prev);
+  if(!independent && (params.status !== 'repaired' || params.streetName || params.jurisdiction || params.segmentConfidence || params.severityLabel)) throw new Error('Verify the street before changing its details.');
   if(params.streetName?.trim() && normalizeStreetName(params.streetName)!==normalizeStreetName(String(prev.streetName||'')))throw new Error('Street correction requires a fresh independent location record, not an administrative relabel.');
   const prevStatus = String(prev.status || 'accepted');
 
@@ -863,9 +821,7 @@ export async function adminReviewPothole(
           ? 'needs_review'
           : 'accepted',
     severityLabel: nextSeverity,
-    streetName: nextStreet.slice(0, 128),
-    normalizedStreet: nextNormalizedStreet.slice(0, 128),
-    jurisdiction: nextJurisdiction,
+    ...(independent ? {streetName: nextStreet.slice(0, 128), normalizedStreet: nextNormalizedStreet.slice(0, 128), jurisdiction: nextJurisdiction} : {}),
     updatedAt: FieldValue.serverTimestamp(),
   };
 
@@ -882,7 +838,7 @@ export async function adminReviewPothole(
   });
 
   let segmentId = typeof prev.segmentId === 'string' && prev.segmentId ? prev.segmentId : null;
-  if (!segmentId && ACCEPTED_HISTORICAL_STATUSES.has(nextStatus)) {
+  if (independent && nextStatus !== 'repaired' && !segmentId && ACCEPTED_HISTORICAL_STATUSES.has(nextStatus)) {
     const resolved = await resolveOrCreateStreetSegment(db, {
       potholeId: params.potholeId,
       lat: Number(prev.lat),
@@ -906,37 +862,7 @@ export async function adminReviewPothole(
     });
   }
 
-  // If newly marked confirmed repaired, evaluate Community Champion & emit repair notifications
-  if (nextStatus === 'repaired' && prevStatus !== 'repaired') {
-    const contribUid = String(prev.primaryContributorUid || '');
-    const contribUsername = String(prev.primaryContributorUsername || 'atlanta_user');
-    const contribDisplay = String(prev.primaryContributorDisplayName || 'Patcher');
-    if (contribUid) {
-      await Promise.all([
-        evaluateUserAchievements(db, contribUid, true).catch(() => {}),
-        createNotification(db, {
-          uid: contribUid,
-          notificationId: `repair_${params.potholeId}_${contribUid}`.slice(0, 128),
-          type: 'confirmed_repair',
-          title: 'Confirmed Street Repair',
-          body: `Your documented pothole on ${nextStreet} was confirmed repaired.`,
-          relatedId: params.potholeId,
-        }).catch(() => {}),
-        createActivityFeedEvent(db, {
-          actorUid: contribUid,
-          actorUsername: contribUsername,
-          actorDisplayName: contribDisplay,
-          eventType: 'confirmed_repair',
-          summary: `Pothole documented by @${contribUsername} on ${nextStreet} confirmed repaired`,
-          streetName: nextStreet,
-          neighborhood: typeof prev.neighborhood === 'string' ? prev.neighborhood : undefined,
-          potholeId: params.potholeId,
-        }).catch(() => {}),
-      ]);
-    }
-  }
-
-  const recount = segmentId ? await recountSegmentTransactionally(db, segmentId) : null;
+  const recount = independent && segmentId && (reportsEnabled() || isNewReportGroup((await db.collection('streetSegments').doc(segmentId).get()).data())) ? await recountSegmentTransactionally(db, segmentId) : null;
 
   await writeAdminAudit(db, {
     actor: params.actor,
@@ -944,8 +870,8 @@ export async function adminReviewPothole(
     targetType: 'pothole',
     targetId: params.potholeId,
     reason: params.reason,
-    beforeSummary: `status=${prevStatus}, street=${prev.streetName}, jur=${prev.jurisdiction}`,
-    afterSummary: `status=${nextStatus}, street=${nextStreet}, jur=${nextJurisdiction}, seg=${segmentId ?? 'none'}`,
+    beforeSummary: `status=${prevStatus}`,
+    afterSummary: `status=${nextStatus}`,
   });
 
   return {
@@ -1246,6 +1172,7 @@ export async function adminTransitionReportStatus(
       throw new Error('Community report record not found.');
     }
     const report = reportSnap.data()!;
+    if (!isNewReportGroup(report) && !reportsEnabled()) throw new Error('Older report needs location verification.');
     const currentStatus = report.status as ReportStatus;
 
     const allowedNext = ALLOWED_REPORT_TRANSITIONS[currentStatus] || [];
@@ -1279,6 +1206,7 @@ export async function adminTransitionReportStatus(
         ? await tx.getAll(...snapshotIds.map((id) => db.collection('potholes').doc(id)))
         : [];
 
+    if (['ready_for_submission','submitted'].includes(params.status) && ((!isNewReportGroup(segSnap.data())&&!reportsEnabled()) || snapshotIds.length < 5 || new Set(snapshotIds).size !== snapshotIds.length || potDocs.some(d=>!isIndependentRecord(d.data()) || d.data()?.segmentId!==segmentId || !ACTIVE_CYCLE_POTHOLE_STATUSES.has(String(d.data()?.status)) || normalizeStreetName(String(d.data()?.streetName||''))!==normalizeStreetName(String(report.streetName||''))))) throw new Error('Verify every pothole location before submitting.');
     const contribUids = new Set<string>();
     for (const pDoc of potDocs) {
       if (pDoc.exists && typeof pDoc.data()?.primaryContributorUid === 'string') {
@@ -1347,30 +1275,6 @@ export async function adminTransitionReportStatus(
     };
   });
 
-  if (
-    params.status === 'submitted' ||
-    params.status === 'acknowledged' ||
-    params.status === 'resolved'
-  ) {
-    const labelMap: Record<string, string> = {
-      submitted: `Submitted (${txOutcome.cleanExtRef})`,
-      acknowledged: 'Acknowledged by agency',
-      resolved: 'Resolved & cycle closed',
-    };
-    await Promise.all(
-      txOutcome.contribUids.map((uid) =>
-        createNotification(db, {
-          uid,
-          notificationId: `rep_${params.reportId}_${params.status}_${uid}`.slice(0, 128),
-          type: 'report_status',
-          title: `Report Update: ${txOutcome.corridorLabel}`,
-          body: `Street report status updated to ${labelMap[params.status] || params.status}.`,
-          relatedId: params.reportId,
-        }).catch(() => {})
-      )
-    );
-  }
-
   await writeAdminAudit(db, {
     actor: params.actor,
     action: 'report_status_transition',
@@ -1391,7 +1295,6 @@ export async function adminTransitionReportStatus(
 }
 
 export async function backfillAcceptedPotholeSegments(db: Firestore): Promise<number> {
-  if(!reportsEnabled())return 0;
   const snap = await db.collection('potholes').limit(120).get();
   let updated = 0;
 
@@ -1399,7 +1302,7 @@ export async function backfillAcceptedPotholeSegments(db: Firestore): Promise<nu
     const p = docSnap.data();
     const status = String(p.status || 'accepted');
     if (status === 'rejected' || status === 'provisional') continue;
-    if (typeof p.segmentId === 'string' && p.segmentId.length > 0) continue;
+    if (!isIndependentRecord(p) || (typeof p.segmentId === 'string' && p.segmentId.length > 0)) continue;
 
     try {
       await evaluateSegmentMembershipAndThreshold(db, docSnap.id);

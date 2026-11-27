@@ -1,3 +1,4 @@
+import { isCommunityNotification, type CommunityNotificationType } from '../src/lib/communityNotifications.ts';
 import { FieldValue, type Firestore, type Timestamp } from 'firebase-admin/firestore';
 
 export interface AchievementDefinition {
@@ -77,14 +78,7 @@ export function makeFriendshipId(uidA: string, uidB: string): string {
   return [uidA, uidB].sort().join('__');
 }
 
-export type NotificationType =
-  | 'friend_request'
-  | 'friend_accepted'
-  | 'badge_unlocked'
-  | 'leaderboard_milestone'
-  | 'segment_threshold'
-  | 'report_status'
-  | 'confirmed_repair';
+export type NotificationType = CommunityNotificationType;
 
 export async function createNotification(
   db: Firestore,
@@ -97,6 +91,7 @@ export async function createNotification(
     notificationId?: string;
   }
 ): Promise<void> {
+  if (!isCommunityNotification(params.type)) return;
   const notificationId =
     params.notificationId || `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 

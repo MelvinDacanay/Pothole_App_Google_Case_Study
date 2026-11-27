@@ -1,3 +1,4 @@
+import { COMMUNITY_NOTIFICATION_TYPES, isCommunityNotification } from '../lib/communityNotifications';
 import { useCallback, useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
@@ -219,6 +220,7 @@ export function useNotifications(user: User | null) {
     const q = query(
       collection(db, 'notifications', user.uid, 'items'),
       where('uid', '==', user.uid),
+      where('type', 'in', [...COMMUNITY_NOTIFICATION_TYPES]),
       limit(30)
     );
 
@@ -227,6 +229,7 @@ export function useNotifications(user: User | null) {
       (snap) => {
         const items = snap.docs
           .map((d) => d.data() as NotificationRecord)
+          .filter(n => isCommunityNotification(n.type))
           .sort((a, b) => {
             const aMs = a.createdAt?.toMillis?.() ?? 0;
             const bMs = b.createdAt?.toMillis?.() ?? 0;
