@@ -57,7 +57,7 @@ interface ReverseGeocodeResponse {
   postalCode?: string;
   placeId?: string;
   jurisdiction: 'atldot' | 'gdot' | 'unknown';
-  source: 'city_centerline' | 'coordinate_fallback';
+  source: 'city_centerline' | 'google_geocoding' | 'coordinate_fallback';
   inAtlantaMetro: boolean;
 }
 
@@ -111,7 +111,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const [compressedPhoto, setCompressedPhoto] = useState<CompressedImageResult | null>(null);
   const [privacyChecked,setPrivacyChecked]=useState(false);
   const [cropping,setCropping]=useState(false);
-  const [streetSource,setStreetSource]=useState<'city_centerline'|'user_observed'>('user_observed');
+  const [streetSource,setStreetSource]=useState<'city_centerline'|'google_geocoding'|'user_observed'>('user_observed');
   const [confirmedLocation,setConfirmedLocation]=useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [mediaId, setMediaId] = useState<string | null>(null);
@@ -133,7 +133,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   // Reverse geocoding & street metadata
   const [geocoding, setGeocoding] = useState(false);
-  const [geocodeSource, setGeocodeSource] = useState<string | null>(null);
+  const [resolvedCoordinateKey,setResolvedCoordinateKey]=useState('');
+  const [locationLookupMessage,setLocationLookupMessage]=useState('');
   const [inAtlantaMetro, setInAtlantaMetro] = useState<boolean>(true);
   const [formattedAddress, setFormattedAddress] = useState(
     preselectedPothole?.formattedAddress ?? ''
@@ -177,7 +178,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const coordinateKey = coords ? `${coords.lat},${coords.lng}` : '';
   const withinAtlanta = Boolean(coords && coords.lat >= 33.35 && coords.lat <= 34.2 && coords.lng >= -84.85 && coords.lng <= -84.0);
   const confirmationKey=JSON.stringify([photoSeqRef.current,coordinateKey,streetName.trim(),streetSource]);
-  const lookupReady = Boolean(coordinateKey && lookupKey === coordinateKey && !gpsLoading && !geocoding && !searchingCandidates && !lookupError && streetName.trim() && withinAtlanta);
+  const lookupReady = Boolean(coordinateKey && lookupKey === coordinateKey && resolvedCoordinateKey === coordinateKey && !gpsLoading && !geocoding && !searchingCandidates && !lookupError && streetName.trim() && withinAtlanta);
   const locationReady=lookupReady&&confirmedLocation===confirmationKey;
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedResult, setSubmittedResult] = useState<{
@@ -217,7 +218,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   }, [preselectedPothole]);
 
   const runReverseGeocode = useCallback(
-    async (target: { lat: number; lng: number }, forceOverwriteText = false) => {
+    async (target: { lat: number; lng: number }) => {
       if (!user) return;
       const seq = ++geocodeSeqRef.current;
       setGeocoding(true);
@@ -233,17 +234,18 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         });
         const data = (await res.json()) as ReverseGeocodeResponse & {
           quotaExceeded?: boolean;
+          lookupStatus?: string;
           error?: string;
         };
         if (seq !== geocodeSeqRef.current) return;
 
         if (res.status === 429 || data.quotaExceeded) {
           dispatchMapsQuotaWarning();
+          setLocationLookupMessage('Street lookup quota reached. Enter the observed street or try again later.');
           return;
         }
-        if (!res.ok) return;
+        if (!res.ok) throw new Error('Street lookup unavailable.');
 
-        setGeocodeSource(data.source);
         setInAtlantaMetro(Boolean(data.inAtlantaMetro));
         setNeighborhood(data.neighborhood || '');
         setCity(data.city || 'Atlanta');
@@ -251,21 +253,21 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         setPostalCode(data.postalCode || '');
         setPlaceId(data.placeId || '');
 
-        if (forceOverwriteText || !locationUserCorrected) {
-          setFormattedAddress(data.formattedAddress || '');
-          setStreetName(current=>data.streetName||current);
-          if(data.streetName)setStreetSource(data.source==='city_centerline'?'city_centerline':'user_observed');
-        }
+        setFormattedAddress(data.formattedAddress || '');
+        setStreetName(data.streetName || '');
+        setStreetSource(data.streetName && (data.source==='city_centerline'||data.source==='google_geocoding')?data.source:'user_observed');
+        setLocationLookupMessage(data.streetName?'':data.lookupStatus==='quota'?'Street lookup quota reached. Enter the observed street or retry later.':'No reliable street found. Adjust the pin or enter the observed street.');
         return data.streetName || '';
       } catch {
-        // Non-fatal fallback: coordinates remain valid even if reverse geocode fails
+        if(seq===geocodeSeqRef.current)setLocationLookupMessage('Street lookup unavailable. Adjust the pin, retry, or enter the observed street.');
       } finally {
         if (seq === geocodeSeqRef.current) {
+          setResolvedCoordinateKey(`${target.lat},${target.lng}`);
           setGeocoding(false);
         }
       }
     },
-    [user, locationUserCorrected]
+    [user]
   );
 
   const runCandidateSearch = useCallback(
@@ -328,19 +330,20 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   // Resolve an independent street suggestion only when the pin changes.
   useEffect(()=>{
     setConfirmedLocation('');setLookupKey('');setLookupError(false);geocodeSeqRef.current++;candidateSeqRef.current++;
-    setGeocoding(false);setSearchingCandidates(false);
+    setGeocoding(false);setSearchingCandidates(false);setResolvedCoordinateKey('');setLocationLookupMessage('');
     if(!user||!coords)return;
-    const timer=window.setTimeout(()=>void runReverseGeocode(coords,true),350);
+    setStreetName('');setFormattedAddress('');setStreetSource('user_observed');setPlaceId('');setPostalCode('');setNeighborhood('');setCity('Atlanta');setStateCode('GA');setGeocoding(true);
+    const timer=window.setTimeout(()=>void runReverseGeocode(coords),350);
     return()=>{window.clearTimeout(timer);geocodeSeqRef.current++;};
-  },[coordinateKey,user,lookupRetry]);
+  },[coordinateKey,user,lookupRetry,runReverseGeocode]);
   // Recheck nearby potholes after street edits; stale results cannot enable publishing.
   useEffect(()=>{
     setConfirmedLocation('');setLookupKey('');setLookupError(false);candidateSeqRef.current++;setSearchingCandidates(false);
-    if(!user||!coords||!streetName.trim()||geocoding)return;
+    if(!user||!coords||!streetName.trim()||geocoding||resolvedCoordinateKey!==coordinateKey)return;
     let canceled=false;
     const timer=window.setTimeout(async()=>{const ok=await runCandidateSearch(coords,streetName.trim());if(!canceled){setLookupKey(ok?coordinateKey:'');setLookupError(!ok);}},350);
     return()=>{canceled=true;window.clearTimeout(timer);candidateSeqRef.current++;};
-  },[coordinateKey,streetName,geocoding,lookupRetry,user,preselectedPothole]);
+  },[coordinateKey,streetName,geocoding,lookupRetry,user,preselectedPothole,resolvedCoordinateKey,runCandidateSearch]);
 
   const startUpload = async (compressed: CompressedImageResult, photoSeq=photoSeqRef.current) => {
     if (!user || !privacyChecked) {setUploading(false);return;}
@@ -384,7 +387,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const processSelectedFile = async (file: File, source: 'camera' | 'file') => {
     if (submissionLock.current || submittedPayload.current) return;
     const photoSeq=++photoSeqRef.current;
-    gpsSeqRef.current++;setPrivacyChecked(false);setConfirmedLocation('');setManualLocationOpen(true);setLookupKey('');setCoords(null);setStreetName('');setFormattedAddress('');setStreetSource('user_observed');
+    gpsSeqRef.current++;geocodeSeqRef.current++;candidateSeqRef.current++;setResolvedCoordinateKey('');setLookupRetry(n=>n+1);setPrivacyChecked(false);setConfirmedLocation('');setManualLocationOpen(false);setLookupKey('');setCoords(null);setStreetName('');setFormattedAddress('');setStreetSource('user_observed');
     analysisStarted.current=null; setSubmitError(null);setCompressedPhoto(null);setPreviewUrl(null);setExifCoordsFound(null);if(previewRef.current){URL.revokeObjectURL(previewRef.current);previewRef.current=null;}
     analysisSeqRef.current++;analysisAbortRef.current?.abort();uploadAbortRef.current?.abort();
     setGpsLoading(false);setMediaId(null);setAnalyzingAi(false);setUploading(true);setClassificationAppealed(false);
@@ -415,7 +418,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         setGpsStatusMsg('Loaded genuine GPS coordinates from photograph EXIF metadata.');
       } else if(preselectedPothole){setCoords({lat:preselectedPothole.lat,lng:preselectedPothole.lng});setCoordinateSource('manual_pin');setAccuracyMeters(undefined);setStreetName(preselectedPothole.streetName);setLocationUserCorrected(false);}
       else if(source==='camera'){handleUseCurrentGps();}
-      else {setGpsStatusMsg('This photo has no GPS information. Place the pin where the pothole was photographed.');setAccuracyMeters(undefined);setCoordinateSource('manual_pin');}
+      else {setManualLocationOpen(true);setGpsStatusMsg('This photo has no GPS information. Place the pin where the pothole was photographed.');setAccuracyMeters(undefined);setCoordinateSource('manual_pin');}
       setUploading(false);
     } catch (err) {
       if(photoSeq===photoSeqRef.current){setUploadError(err instanceof Error ? err.message : 'Unable to process image.');setUploading(false);}
@@ -438,6 +441,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   function handleUseCurrentGps() {
     if(submittedPayload.current || submissionLock.current)return;
     if (!('geolocation' in navigator)) {
+      setManualLocationOpen(true);
       setGpsStatusMsg('Browser geolocation is unavailable here. Tap the map to place a manual pin.');
       return;
     }
@@ -453,7 +457,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           lat: Number(position.coords.latitude.toFixed(6)),
           lng: Number(position.coords.longitude.toFixed(6)),
         };
-        setLookupKey(''); setLookupRetry(n=>n+1);
+        geocodeSeqRef.current++;candidateSeqRef.current++;setResolvedCoordinateKey('');setLookupKey(''); setLookupRetry(n=>n+1);
         setConfirmedLocation('');setStreetName('');setCoords(nextCoords);
         setCoordinateSource('gps_verified');
         setAccuracyMeters(
@@ -467,7 +471,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       },
       (geoErr) => {
         if (gpsPhotoSeq !== photoSeqRef.current || gpsSeq !== gpsSeqRef.current) return;
-        setGpsLoading(false);
+        setGpsLoading(false);setManualLocationOpen(true);
         if (geoErr.code === geoErr.PERMISSION_DENIED) {
           setGpsStatusMsg(
             'Location permission declined. Tap the Atlanta map below to place a manual pin.'
@@ -489,13 +493,14 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const handleManualPinChange = (nextCoords: { lat: number; lng: number }) => {
     if(submittedPayload.current || submissionLock.current)return;
     gpsSeqRef.current++; setGpsLoading(false);
-    setLookupKey('');
+    if(coords?.lat===nextCoords.lat&&coords?.lng===nextCoords.lng)return;
+    geocodeSeqRef.current++;candidateSeqRef.current++;setResolvedCoordinateKey('');setLookupKey('');
     setConfirmedLocation('');setCoords(nextCoords);
     setStreetName(''); setFormattedAddress('');
     setCoordinateSource('manual_pin');
     setAccuracyMeters(undefined);
     setLocationUserCorrected(false);
-    setGpsStatusMsg('Pin updated. Check the street name and confirm the location.');
+    setGpsStatusMsg('Pin updated. Check the suggested location.');
     setLookupRetry(n=>n+1);
   };
 
@@ -946,7 +951,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      gpsSeqRef.current++; setGpsLoading(false); setLookupKey(''); setLookupRetry(n=>n+1);
+                      gpsSeqRef.current++; setGpsLoading(false); geocodeSeqRef.current++;candidateSeqRef.current++;setResolvedCoordinateKey('');setLookupKey(''); setLookupRetry(n=>n+1);
                       setConfirmedLocation('');setStreetName('');setCoords(exifCoordsFound);
                       setCoordinateSource('exif_extracted');
                       setAccuracyMeters(undefined);
@@ -1000,7 +1005,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
             {coords && (
               <button
                 type="button"
-                onClick={() => { setLookupKey(''); setLocationUserCorrected(false); setLookupRetry(n=>n+1); }}
+                onClick={() => { setResolvedCoordinateKey('');setLookupKey(''); setLocationUserCorrected(false); setLookupRetry(n=>n+1); }}
                 disabled={geocoding}
                 className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] inline-flex items-center gap-1.5"
               >
@@ -1036,7 +1041,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label className="block space-y-1.5">
             <span className="text-xs font-semibold text-[#4B4646]">
-              Street name from a street sign or your own knowledge {geocoding ? '(Looking up...)' : ''}
+              Street name {geocoding ? '(Looking up...)' : streetSource==='user_observed'?'(enter only if needed)':'(automatically identified)'}
             </span>
             <input
               type="text"
@@ -1045,7 +1050,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
               disabled={geocoding}
               placeholder="e.g., Peachtree St NE"
               onChange={(e) => {
-                setStreetName(e.target.value);setLookupKey('');setStreetSource('user_observed');setConfirmedLocation('');
+                candidateSeqRef.current++;setStreetName(e.target.value);setFormattedAddress('');setPlaceId('');setLookupKey('');setStreetSource('user_observed');setConfirmedLocation('');
                 setLocationUserCorrected(true);
               }}
               className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-sm text-[#2D2B35] focus:outline-2 focus:outline-[#4CB729]"
@@ -1068,7 +1073,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5]/70 px-3 py-2">
             Geocode:{' '}
             <span className="font-semibold text-[#2D2B35]">
-              {geocodeSource === 'city_centerline' ? 'City street data' : 'Street name entered by reporter'}
+              {streetSource==='google_geocoding'?'Google Maps':streetSource==='city_centerline'?'City street data':'Reporter / not yet identified'}
             </span>
           </div>
         </div>
@@ -1089,10 +1094,11 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       </section>
 
       {compressedPhoto && !submittedPayload.current && <div className="rounded-xl border p-4 space-y-2">
+        {geocoding?<p role="status" className="text-sm">Finding street and address…</p>:streetName?<div className="text-sm"><strong>{streetName}</strong>{formattedAddress&&formattedAddress!==streetName&&<p>{formattedAddress}</p>}{streetSource==='google_geocoding'&&<p className="text-xs font-medium">Google Maps · approximate address</p>}</div>:locationLookupMessage?<p role="status" className="text-sm">{locationLookupMessage}</p>:null}
         <p className="text-sm">{locationReady?'Location confirmed. Approved photos will publish automatically.':'Confirm the pin is at the pothole, not your current location unless you are there.'}</p>
-        <button type="button" className="border rounded-lg px-4 py-2" onClick={()=>setManualLocationOpen(true)}>Show or adjust map pin</button>
+        <button type="button" className="border rounded-lg px-4 py-2" onClick={()=>setManualLocationOpen(true)}>Show or adjust map pin / street</button>
         <button type="button" disabled={!lookupReady} className="bg-[#2D2B35] text-white rounded-lg px-4 py-2 disabled:opacity-50" onClick={()=>setConfirmedLocation(confirmationKey)}>Confirm pothole location</button>
-        {lookupError&&<button type="button" className="underline" onClick={()=>setLookupRetry(n=>n+1)}>Retry nearby photo check</button>}
+        {(lookupError||locationLookupMessage)&&<button type="button" className="underline" onClick={()=>setLookupRetry(n=>n+1)}>Retry location and nearby check</button>}
       </div>}
       {/* Step 3: 25m Duplicate Review & Optional AI Check */}
       <section inert={submitting || Boolean(submittedPayload.current)} className="capture-internal-checks bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
@@ -1109,7 +1115,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           {coords && (
             <button
               type="button"
-              onClick={() => { setLookupKey(''); setLookupRetry(n=>n+1); }}
+              onClick={() => { geocodeSeqRef.current++;candidateSeqRef.current++;setResolvedCoordinateKey('');setLookupKey(''); setLookupRetry(n=>n+1); }}
               disabled={searchingCandidates}
               className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] inline-flex items-center gap-1.5 shrink-0"
             >

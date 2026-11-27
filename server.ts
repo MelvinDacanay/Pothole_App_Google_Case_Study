@@ -1,7 +1,8 @@
 import {publicPothole,publicEvidence,publicActivity} from './server/publicCommunity.ts';
 import { loadMediaBytes, storeSanitizedUpload, isReadableMedia, mediaBackend, runMediaMaintenance } from './server/mediaStore.ts';
 import { decodeUpload, PHOTO_PRIVACY_VERSION } from './server/photoPrivacy.ts';
-import { lookupCityRoad, confirmRoad } from './server/roadLocation.ts';
+import { lookupGoogleStreet } from './server/googleGeocoding.ts';
+import { lookupCityRoad, confirmRoad, saveGoogleRoad } from './server/roadLocation.ts';
 import { buildReportDraft } from './server/adminDraft.ts';
 import 'dotenv/config';
 import { CONSENT_VERSION, hasAccountConsent, saveAccountConsent, validConsentRequest } from './server/consent.ts';
@@ -389,20 +390,27 @@ async function startServer() {
   });
 
   app.post('/api/geocode/reverse', async (req, res) => {
-    const decoded = await verifyBearerToken(req, res, false);
+    const decoded = await verifyBearerToken(req, res, true);
     if (!decoded) return;
-
-    const lat = Number(req.body?.lat);
-    const lng = Number(req.body?.lng);
-    if (!isValidCoordinatePair(lat, lng)) {
-      res.status(400).json({ error: 'Invalid latitude or longitude coordinates.' });
-      return;
+    res.setHeader('Cache-Control','no-store');
+    const {lat,lng} = req.body || {};
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !isValidCoordinatePair(lat,lng)) {
+      res.status(400).json({error:'Invalid latitude or longitude coordinates.'}); return;
     }
-
     const db=getServerFirestore(); if(!db){res.status(503).json({error:'Location service unavailable.'});return;}
     if(!await requireAccountConsent(db,decoded.uid,res))return;
-    const match=await lookupCityRoad(db,decoded.uid,lat,lng);
-    res.json({...match,streetName:match?.streetName||'',source:match?'city_centerline':'coordinate_fallback',inAtlantaMetro:isWithinAtlantaMetro(lat,lng)});
+    const inAtlantaMetro=isWithinAtlantaMetro(lat,lng);
+    if(!inAtlantaMetro){res.json({streetName:'',source:'coordinate_fallback',inAtlantaMetro});return;}
+    try {
+      const city=await lookupCityRoad(db,decoded.uid,lat,lng);
+      const google=await lookupGoogleStreet(db,decoded.uid,lat,lng,firebaseConfig?.projectId || 'patchup-fff96');
+      if(google.match && (!city || normalizeStreetName(city.streetName)===normalizeStreetName(google.match.streetName))) {
+        const match=await saveGoogleRoad(db,decoded.uid,lat,lng,google.match,city?.jurisdiction || 'unknown');
+        res.json({...match,source:'google_geocoding',inAtlantaMetro});return;
+      }
+      if(city){res.json({...city,formattedAddress:city.streetName,source:'city_centerline',inAtlantaMetro});return;}
+      res.json({streetName:'',source:'coordinate_fallback',inAtlantaMetro,lookupStatus:google.status});
+    }catch{res.status(503).json({error:'Location lookup unavailable. Check the pin or enter the observed street.'});}
   });
 
   app.post('/api/potholes/candidates', async (req, res) => {

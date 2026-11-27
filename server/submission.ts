@@ -8,7 +8,7 @@ export interface SubmissionInput {
   uid:string; submissionId:string; mediaId:string; verificationId:string; requestedAction:string; targetPotholeId:string;
   lat:number;lng:number;actionType:string;coordinateSource:string;accuracyMeters?:number;formattedAddress:string;
   streetName:string;normalizedStreet:string;neighborhood:string;city:string;state:string;postalCode:string;placeId:string;
-  jurisdiction:JurisdictionType;locationUserCorrected:boolean;streetSource?:'city_centerline'|'user_observed'|'legacy';notes:string;duplicateConfidence:number;candidatePotholeIds:string[];
+  jurisdiction:JurisdictionType;locationUserCorrected:boolean;streetSource?:'city_centerline'|'user_observed'|'google_geocoding'|'legacy';notes:string;duplicateConfidence:number;candidatePotholeIds:string[];
 }
 // Caller authenticates and validates input; this function owns all database authorization and atomic mutations.
 export async function commitVerifiedSubmission(serverDb:Firestore,p:SubmissionInput) {
