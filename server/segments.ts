@@ -1,8 +1,8 @@
+import { isIndependentRecord, reportsEnabled } from './locationPolicy.ts';
 import { FieldValue, type Firestore, type Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { getAllowedAdminEmails, isAllowedAdminAccount, normalizeEmail } from './adminAuthorization.ts';
 import {
-  classifyJurisdiction,
   haversineMeters,
   isWithinAtlantaMetro,
   normalizeStreetName,
@@ -328,6 +328,7 @@ export async function evaluateSegmentMembershipAndThreshold(
     throw new Error('Pothole record not found for segment evaluation.');
   }
   const initialPothole = potholeSnap.data()!;
+  if(!reportsEnabled()||!isIndependentRecord(initialPothole))throw new Error('Independent location history audit required.');
 
   const { segmentId } = await resolveOrCreateStreetSegment(db, {
     potholeId,
@@ -361,6 +362,7 @@ export async function evaluateSegmentMembershipAndThreshold(
     }
 
     const pot = potDoc.data()!;
+    if(!isIndependentRecord(pot))throw new Error('Independent location required.');
     const seg = segDoc.data()!;
     const cycleNumber = Number(seg.currentCycleNumber || 1);
     const deterministicReportId = `rep_${segmentId}_c${cycleNumber}`;
@@ -470,7 +472,7 @@ export async function evaluateSegmentMembershipAndThreshold(
 
     const segConfidence = (seg.confidence as SegmentConfidence) || 'needs_review';
     const shouldCreateReport =
-      (segConfidence === 'verified' || (seg.jurisdiction==='unknown' && ['user_observed','city_centerline'].includes(String(pot.streetSource)) && !/\b(ramp|exit|milepost|overpass|viaduct|bridge|interchange|collector)\b|[&/]/i.test(String(pot.streetName||'')))) &&
+      (segConfidence === 'verified' || (seg.jurisdiction==='unknown' && ['user_observed','city_centerline','tiger_line'].includes(String(pot.streetSource)) && !/\b(ramp|exit|milepost|overpass|viaduct|bridge|interchange|collector)\b|[&/]/i.test(String(pot.streetName||'')))) &&
       nextCycleDistinctCount >= THRESHOLD_DISTINCT_COUNT &&
       !existingReportDoc.exists;
 
@@ -481,6 +483,7 @@ export async function evaluateSegmentMembershipAndThreshold(
       const snapshotPotRefs = snapshotIds.map((id) => db.collection('potholes').doc(id));
       const snapshotPotDocs =
         snapshotPotRefs.length > 0 ? await tx.getAll(...snapshotPotRefs) : [];
+      if(snapshotPotDocs.some(d=>!d.exists||!isIndependentRecord(d.data())))throw new Error('Report snapshot contains an unverified location.');
 
       tx.set(memberRef, {
         potholeId,
@@ -840,14 +843,15 @@ export async function adminReviewPothole(
     throw new Error('Pothole record not found.');
   }
   const prev = potSnap.data()!;
+  if(!isIndependentRecord(prev))throw new Error('Independent location provenance required before review.');
+  if(params.streetName?.trim() && normalizeStreetName(params.streetName)!==normalizeStreetName(String(prev.streetName||'')))throw new Error('Street correction requires a fresh independent location record, not an administrative relabel.');
   const prevStatus = String(prev.status || 'accepted');
 
   const nextStatus = params.status || prevStatus;
   const nextStreet = params.streetName?.trim() || String(prev.streetName || 'Atlanta Street');
   const nextNormalizedStreet = normalizeStreetName(nextStreet) || String(prev.normalizedStreet || '');
   const nextJurisdiction =
-    params.jurisdiction ||
-    classifyJurisdiction(nextStreet, String(prev.formattedAddress || ''), String(prev.city || 'Atlanta'));
+    params.jurisdiction || (prev.jurisdiction as JurisdictionType) || 'unknown';
   const nextSeverity = params.severityLabel || String(prev.severityLabel || 'unclassified');
 
   const updates: Record<string, unknown> = {
@@ -973,6 +977,8 @@ export async function adminReassignPotholeSegment(
   const potSnap = await potRef.get();
   if (!potSnap.exists) throw new Error('Pothole record not found.');
   const pot = potSnap.data()!;
+  if(!isIndependentRecord(pot))throw new Error('Independent location provenance required before reassignment.');
+  if(params.streetName?.trim() && normalizeStreetName(params.streetName)!==normalizeStreetName(String(pot.streetName||'')))throw new Error('Independent street proof required for a changed street name.');
   const oldSegmentId = typeof pot.segmentId === 'string' ? pot.segmentId : null;
 
   let newSegmentId = params.targetSegmentId?.trim() || '';
@@ -983,7 +989,7 @@ export async function adminReassignPotholeSegment(
       .replace(/^\d+[a-z]?\s+/i, '')
       .trim();
     const normStreet = normalizeStreetName(cleanStreet) || 'unverified street';
-    const jur = params.jurisdiction || (pot.jurisdiction as JurisdictionType) || 'atldot';
+    const jur = params.jurisdiction || (pot.jurisdiction as JurisdictionType) || 'unknown';
     const bNum = parseStreetNumber(String(pot.formattedAddress || ''));
     newSegmentId = makeSegmentSlug(normStreet, Number(pot.lat), Number(pot.lng));
     const corridorLabel = buildBlockRangeLabel(cleanStreet, bNum, bNum).slice(0, 160);
@@ -1385,6 +1391,7 @@ export async function adminTransitionReportStatus(
 }
 
 export async function backfillAcceptedPotholeSegments(db: Firestore): Promise<number> {
+  if(!reportsEnabled())return 0;
   const snap = await db.collection('potholes').limit(120).get();
   let updated = 0;
 

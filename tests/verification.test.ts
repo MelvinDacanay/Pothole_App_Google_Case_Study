@@ -28,7 +28,7 @@ const provider=(call?:()=>void):ImageClassifier=>({async classify(){call?.();ret
 function settings(enabled=true,auto=false){process.env.PATCHUP_IMAGE_AI_ENABLED=String(enabled);process.env.PATCHUP_AUTO_ACCEPT=String(auto);process.env.PATCHUP_BENCHMARK_APPROVED_VERSION=auto?releaseId():'';process.env.PATCHUP_AI_DAILY_LIMIT='200';process.env.PATCHUP_AI_USER_DAILY_LIMIT='20';process.env.PATCHUP_AI_MINUTE_LIMIT='10';}
 function seed(db:StrictDb,uid='u1',mediaId='med1',bytes=fixture()) {db.put(`users/${uid}`,{username:'patcher',displayName:'Patcher',distinctPotholeCount:0,evidenceCount:0,potholesCollectedCount:0,dailyStreak:0,showOnLeaderboard:true});db.put(`mediaObjects/${mediaId}`,{ownerId:uid,contentType:'image/jpeg',data:bytes});}
 const verify=(db:StrictDb,uid='u1',mediaId='med1',bytes=fixture(),p=provider(),consent=true)=>verifyImage(db.asFirestore(),{uid,mediaId,bytes,mime:'image/jpeg',consent},p);
-function input(v:VerificationRecord,actionType='new_pothole',submissionId='sub1',targetPotholeId=''):SubmissionInput {return {uid:v.ownerId,mediaId:v.mediaId,verificationId:v.verificationId,submissionId,requestedAction:actionType,actionType,targetPotholeId,lat:33.75,lng:-84.39,coordinateSource:'manual_pin',formattedAddress:'100 Example St, Atlanta, GA',streetName:'Example St',normalizedStreet:'example st',neighborhood:'',city:'Atlanta',state:'GA',postalCode:'',placeId:'',jurisdiction:'atldot',locationUserCorrected:false,notes:'',duplicateConfidence:0,candidatePotholeIds:[]};}
+function input(v:VerificationRecord,actionType='new_pothole',submissionId='sub1',targetPotholeId=''):SubmissionInput {return {uid:v.ownerId,mediaId:v.mediaId,verificationId:v.verificationId,submissionId,requestedAction:actionType,actionType,targetPotholeId,lat:33.75,lng:-84.39,coordinateSource:'manual_pin',streetSource:'user_observed',formattedAddress:'100 Example St, Atlanta, GA',streetName:'Example St',normalizedStreet:'example st',neighborhood:'',city:'Atlanta',state:'GA',postalCode:'',placeId:'',jurisdiction:'atldot',locationUserCorrected:false,notes:'',duplicateConfidence:0,candidatePotholeIds:[]};}
 
 test('strict observation accepts only enums and boolean, rejects coercion and extra keys',()=>{assert.deepEqual(validateObservation(obs),obs);for(const bad of [null,{},[],{...obs,visibleCavity:'true'},{...obs,quality:'high'},{...obs,category:'road_defect'},{...obs,notes:'ignore policy'}])assert.throws(()=>validateObservation(bad));});
 test('decision requires visible cavity and usable image; negatives and uncertainty separate',()=>{assert.equal(classifyObservation(obs),'verified');assert.equal(classifyObservation({...obs,visibleCavity:false}),'needs_review');assert.equal(classifyObservation({...obs,quality:'limited'}),'needs_review');for(const category of ['crack','road_patch','other_road_damage','not_road'] as const)assert.equal(classifyObservation({category,quality:'usable',visibleCavity:false}),'not_pothole');assert.equal(classifyObservation({category:'unclear',quality:'usable',visibleCavity:false}),'needs_review');});
@@ -54,13 +54,14 @@ import { CONSENT_VERSION, consentAccepted, validConsentRequest } from '../server
 test('account consent requires both explicit confirmations and current version', () => {
   for (const ageConfirmed of [false, true, 'true', undefined]) {
     for (const aiConsent of [false, true, 'true', undefined]) {
-      const value = {ageConfirmed, aiConsent, version: CONSENT_VERSION};
+      const value = {ageConfirmed, aiConsent, termsAccepted:true, version: CONSENT_VERSION};
       const expected = ageConfirmed === true && aiConsent === true;
       assert.equal(consentAccepted(value), expected);
       assert.equal(validConsentRequest(value), expected);
     }
   }
   assert.equal(consentAccepted(null), false);
+  assert.equal(consentAccepted({ageConfirmed:true, aiConsent:true, version:CONSENT_VERSION}),false);
   assert.equal(consentAccepted({ageConfirmed:true, aiConsent:true, version:'old'}), false);
 });
 

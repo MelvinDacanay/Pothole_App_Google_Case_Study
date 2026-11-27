@@ -17,7 +17,7 @@ export function buildReportDraft(report: Record<string, unknown>, potholes: Reco
     }
     if (usedMedia.has(p.primaryMediaId)) {warnings.push(`Pothole ${index+1} repeats a photo already attached.`);return [];}
     usedMedia.add(p.primaryMediaId);
-    if (!['city_centerline','user_observed'].includes(String(p.streetSource))) warnings.push(`Pothole ${index+1}: confirm the street name independently before sending.`);
+    if (!['city_centerline','tiger_line','user_observed'].includes(String(p.streetSource))) warnings.push(`Pothole ${index+1}: confirm the street name independently before sending.`);
     if (p.jurisdiction !== 'atldot') warnings.push(`Pothole ${index+1} needs jurisdiction confirmation.`);
     if (p.segmentId !== report.segmentId) warnings.push(`Pothole ${index+1} needs corridor confirmation.`);
     return [{number:index+1,potholeId:id,mediaId:p.primaryMediaId,lat:p.lat,lng:p.lng}];

@@ -111,6 +111,8 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
       }
 
       const [segRes, repRes] = await Promise.all([fetch('/api/segments'), fetch('/api/reports')]);
+      if(segRes.status===503||repRes.status===503){setSegments([]);setReports([]);setAdminPotholes([]);setAuditEvents([]);setFeedback({ok:false,text:'Community reporting is temporarily paused for the independent location provenance audit.'});return;}
+      if(!segRes.ok||!repRes.ok)throw new Error('Reports unavailable.');
       const segJson = (await segRes.json()) as { segments?: StreetSegmentRecord[] };
       const repJson = (await repRes.json()) as { reports?: CommunityReportRecord[] };
       setSegments(segJson.segments ?? []);
@@ -375,7 +377,7 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
 
     setPendingSheetConfirm({
       report,
-      spreadsheetTitle: `PatchUp Report — ${report.corridorLabel} (${report.reportId})`,
+      spreadsheetTitle: `PatchUp Report ${report.reportId}`,
       potholes: memberPotholes,
       totalRows: 2 + memberPotholes.length,
     });
@@ -401,7 +403,11 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
     setExportingSheet(true);
     setFeedback(null);
     try {
-      const { report, spreadsheetTitle, potholes } = pendingSheetConfirm;
+      const { report } = pendingSheetConfirm;
+      const exportToken=await user.getIdToken();
+      const approved=await fetch(`/api/admin/reports/${encodeURIComponent(report.reportId)}/export-data`,{headers:{Authorization:`Bearer ${exportToken}`},cache:'no-store'});
+      if(!approved.ok)throw new Error('Export blocked: independent location provenance is incomplete.');
+      const {title:spreadsheetTitle,rows}=await approved.json() as {title:string;rows:(string|number)[][]};
       const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
         method: 'POST',
         headers: {
@@ -429,56 +435,11 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
         spreadsheetUrl: string;
       };
 
-      const rows: (string | number)[][] = [
-        [
-          'Report ID',
-          'Corridor',
-          'Jurisdiction',
-          'Cycle #',
-          'Report Status',
-          'Distinct Count',
-          'Pothole ID',
-          'Address / Street',
-          'Coordinates',
-          'Severity',
-          'Evidence Count',
-          'Patcher',
-        ],
-        [
-          report.reportId,
-          report.corridorLabel,
-          JURISDICTION_LABELS[report.jurisdiction],
-          report.cycleNumber,
-          REPORT_STATUS_LABELS[report.status],
-          report.distinctPotholeCount,
-          'PACKET SUMMARY',
-          report.addressRange || report.corridorLabel,
-          `${report.centerLat.toFixed(5)}, ${report.centerLng.toFixed(5)}`,
-          '-',
-          report.supplementCount,
-          report.externalReference || 'Pending Agency Ref',
-        ],
-        ...potholes.map((p) => [
-          report.reportId,
-          report.corridorLabel,
-          JURISDICTION_LABELS[p.jurisdiction],
-          report.cycleNumber,
-          POTHOLE_STATUS_LABELS[p.status],
-          1,
-          p.potholeId,
-          p.formattedAddress,
-          `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`,
-          p.severityLabel,
-          p.evidenceCount,
-          `@${p.primaryContributorUsername}`,
-        ]),
-      ];
-
-      const range = `Consolidated Packet!A1:L${rows.length}`;
+      const range = `Consolidated Packet!A1:E${rows.length}`;
       const updateRes = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
           created.spreadsheetId
-        )}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+        )}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
         {
           method: 'PUT',
           headers: {

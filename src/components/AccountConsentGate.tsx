@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'rea
 import type { User } from 'firebase/auth';
 import { readApiJson } from '../lib/apiResponse';
 
-const VERSION = '2026-11-27-v2';
+const VERSION = '2026-11-27-v3-location';
 const statements = [
   'I am at least 18 years old.',
   'I understand that Gemini will be used to assess and verify if a photo uploaded is appropriate. I will avoid including sensitive information or other personal details.',
+  'I agree to the PatchUp terms of use, including the applicable Google Maps terms.',
 ] as const;
 
 type Status = 'loading' | 'required' | 'accepted' | 'error';
@@ -13,12 +14,14 @@ export function AccountConsentGate({user, signOut, children}: {user: User; signO
   const [status, setStatus] = useState<Status>('loading');
   const [age, setAge] = useState(false);
   const [consent, setConsent] = useState(false);
+  const [terms,setTerms]=useState(false);
   const [attempted, setAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const ageRef = useRef<HTMLInputElement>(null);
   const consentRef = useRef<HTMLInputElement>(null);
+  const termsRef=useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -46,12 +49,12 @@ export function AccountConsentGate({user, signOut, children}: {user: User; signO
   }, [status]);
   async function submit(e: FormEvent) {
     e.preventDefault(); setAttempted(true); setError('');
-    if (!age || !consent) { (!age ? ageRef : consentRef).current?.focus(); return; }
+    if (!age || !consent || !terms) { (!age ? ageRef : !consent ? consentRef : termsRef).current?.focus(); return; }
     if (saving) return;
     setSaving(true);
     try {
       const token = await user.getIdToken();
-      const response = await fetch('/api/auth/consent', {method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ageConfirmed:age,aiConsent:consent,version:VERSION})});
+      const response = await fetch('/api/auth/consent', {method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ageConfirmed:age,aiConsent:consent,termsAccepted:terms,version:VERSION})});
       const data = await readApiJson<{accepted:boolean;version:string}>(response);
       if (data.accepted !== true || data.version !== VERSION) throw new Error('Your confirmations were not saved. Please retry.');
       if (active.current) setStatus('accepted');
@@ -66,12 +69,12 @@ export function AccountConsentGate({user, signOut, children}: {user: User; signO
     {status === 'required' && <dialog ref={dialogRef} aria-labelledby="consent-title" onCancel={e=>e.preventDefault()} className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl border-2 border-[#17231D] bg-[#fffaf0] p-6 sm:p-8 text-[#17231D] shadow-xl backdrop:bg-[#17231D]/65">
       <form onSubmit={submit} className="space-y-5">
         <img src="/patchup-logo.png" alt="PatchUp" className="w-20 h-auto" />
-        <div><p className="text-xs font-bold tracking-widest uppercase">Before you get started</p><h1 id="consent-title" className="font-display text-2xl mt-2">Welcome to PatchUp</h1><p className="text-sm mt-2">Please confirm both statements to access the app.</p><p className="text-sm mt-2">We remove embedded photo metadata before saving or using Gemini. You confirm the pothole’s location separately. Approved images and road locations are public and may be shared with ATL311; your account details and notes are not included in those reports. Location is requested only when needed. <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="underline">Privacy notice</a></p></div>
-        {([age,consent] as const).map((checked,i)=> <label key={i} className={`flex items-start gap-3 rounded-xl border p-3 text-sm leading-relaxed cursor-pointer ${attempted&&!checked?'border-red-600 text-red-700 bg-red-50':'border-[#b6ac98]'}`}>
-          <input ref={i===0?ageRef:consentRef} type="checkbox" checked={checked} onChange={e=>i===0?setAge(e.target.checked):setConsent(e.target.checked)} disabled={saving} aria-invalid={attempted&&!checked} className="mt-1 h-5 w-5 shrink-0 accent-[#17231D]" />
+        <div><p className="text-xs font-bold tracking-widest uppercase">Before you get started</p><h1 id="consent-title" className="font-display text-2xl mt-2">Welcome to PatchUp</h1><p className="text-sm mt-2">Please confirm all three statements to access the app.</p><p className="text-sm mt-2">We remove embedded photo metadata before saving or using Gemini. You confirm the pothole’s location separately. Approved images and road locations are public and may be shared with ATL311; your account details and notes are not included in those reports. Location is requested only when needed. <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="underline">Privacy notice</a> · <a href="/terms.html" target="_blank" rel="noopener noreferrer" className="underline">Terms of use</a></p></div>
+        {([age,consent,terms] as const).map((checked,i)=> <label key={i} className={`flex items-start gap-3 rounded-xl border p-3 text-sm leading-relaxed cursor-pointer ${attempted&&!checked?'border-red-600 text-red-700 bg-red-50':'border-[#b6ac98]'}`}>
+          <input ref={i===0?ageRef:i===1?consentRef:termsRef} type="checkbox" checked={checked} onChange={e=>i===0?setAge(e.target.checked):i===1?setConsent(e.target.checked):setTerms(e.target.checked)} disabled={saving} aria-invalid={attempted&&!checked} className="mt-1 h-5 w-5 shrink-0 accent-[#17231D]" />
           <span>{statements[i]}</span>
         </label>)}
-        {attempted && (!age || !consent) && <p role="alert" className="text-sm font-semibold text-red-700">Please select both checkboxes to continue.</p>}
+        {attempted && (!age || !consent || !terms) && <p role="alert" className="text-sm font-semibold text-red-700">Please select all three checkboxes to continue.</p>}
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         <button type="submit" disabled={saving} className="w-full min-h-11 rounded-xl bg-[#17231D] text-white font-bold px-4 py-3 disabled:opacity-60">{saving?'Saving…':'Continue to PatchUp'}</button>
         <button type="button" disabled={saving} onClick={()=>void leave()} className="w-full min-h-11 text-sm underline">Sign out</button>

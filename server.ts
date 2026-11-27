@@ -1,9 +1,10 @@
+import { isIndependentRecord, reportsEnabled, exportRows } from './server/locationPolicy.ts';
 import { SharedReadCache } from './server/sharedReadCache.ts';
 import {publicPothole,publicEvidence,publicActivity} from './server/publicCommunity.ts';
 import { loadMediaBytes, storeSanitizedUpload, isReadableMedia, mediaBackend, runMediaMaintenance } from './server/mediaStore.ts';
 import { decodeUpload, PHOTO_PRIVACY_VERSION } from './server/photoPrivacy.ts';
 import { lookupGoogleStreet } from './server/googleGeocoding.ts';
-import { lookupCityRoad, confirmRoad, saveGoogleRoad } from './server/roadLocation.ts';
+import { lookupCityRoad, lookupTigerRoad, confirmRoad } from './server/roadLocation.ts';
 import { buildReportDraft } from './server/adminDraft.ts';
 import 'dotenv/config';
 import { CONSENT_VERSION, hasAccountConsent, saveAccountConsent, validConsentRequest } from './server/consent.ts';
@@ -383,7 +384,7 @@ async function startServer() {
     const decoded = await verifyBearerToken(req, res, true);
     if (!decoded) return;
     res.setHeader('Cache-Control', 'no-store');
-    if (!validConsentRequest(req.body)) { res.status(400).json({error:'Both confirmations and the current consent version are required.'}); return; }
+    if (!validConsentRequest(req.body)) { res.status(400).json({error:'All confirmations and the current consent version are required.'}); return; }
     const db = getServerFirestore();
     if (!db || !adminFirestoreReady) { res.status(503).json({error:'Consent service unavailable.'}); return; }
     try { await saveAccountConsent(db, decoded.uid); res.json({accepted:true, version:CONSENT_VERSION}); }
@@ -395,6 +396,7 @@ async function startServer() {
     if (!decoded) return;
     res.setHeader('Cache-Control','no-store');
     const {lat,lng} = req.body || {};
+    if(req.body?.captureLocationConsent!==true){res.status(400).json({error:'Location consent required.'});return;}
     if (typeof lat !== 'number' || typeof lng !== 'number' || !isValidCoordinatePair(lat,lng)) {
       res.status(400).json({error:'Invalid latitude or longitude coordinates.'}); return;
     }
@@ -403,14 +405,11 @@ async function startServer() {
     const inAtlantaMetro=isWithinAtlantaMetro(lat,lng);
     if(!inAtlantaMetro){res.json({streetName:'',source:'coordinate_fallback',inAtlantaMetro});return;}
     try {
-      const city=await lookupCityRoad(db,decoded.uid,lat,lng);
-      const google=await lookupGoogleStreet(db,decoded.uid,lat,lng,firebaseConfig?.projectId || 'patchup-fff96');
-      if(google.match && (!city || normalizeStreetName(city.streetName)===normalizeStreetName(google.match.streetName))) {
-        const match=await saveGoogleRoad(db,decoded.uid,lat,lng,google.match,city?.jurisdiction || 'unknown');
-        res.json({...match,source:'google_geocoding',inAtlantaMetro});return;
-      }
-      if(city){res.json({...city,formattedAddress:city.streetName,source:'city_centerline',inAtlantaMetro});return;}
-      res.json({streetName:'',source:'coordinate_fallback',inAtlantaMetro,lookupStatus:google.status});
+      const independent=await lookupCityRoad(db,decoded.uid,lat,lng) || await lookupTigerRoad(db,decoded.uid,lat,lng);
+      const google=req.body?.googlePreviewConsent===true?await lookupGoogleStreet(db,decoded.uid,lat,lng,firebaseConfig?.projectId || 'patchup-fff96'):null;
+      const googlePreview=google?.match?{streetName:google.match.streetName,formattedAddress:google.match.formattedAddress}:null;
+      if(independent){res.json({...independent,formattedAddress:independent.streetName,source:independent.streetSource,inAtlantaMetro,googlePreview});return;}
+      res.json({streetName:'',source:'coordinate_fallback',inAtlantaMetro,googlePreview,lookupStatus:google?.status});
     }catch{res.status(503).json({error:'Location lookup unavailable. Check the pin or enter the observed street.'});}
   });
 
@@ -447,6 +446,7 @@ async function startServer() {
       const candidates = snap.docs
         .map((d) => {
           const data = d.data();
+          if(!isIndependentRecord(data))return null;
           const pLat = Number(data.lat);
           const pLng = Number(data.lng);
           const dist = haversineMeters(lat, lng, pLat, pLng);
@@ -597,10 +597,10 @@ async function startServer() {
       return;
     }
 
-    if(body.locationConfirmed!==true){res.status(400).json({error:'Confirm the pothole location first.'});return;}
+    if(body.captureLocationConsent!==true||body.locationConfirmed!==true){res.status(400).json({error:'Confirm the pothole location first.'});return;}
     try {
       const existing=(await serverDb.collection('submissions').doc(submissionId).get()).data();
-      const road=existing?.userId===decoded.uid&&existing.lat===lat&&existing.lng===lng?{streetName:existing.streetName,normalizedStreet:existing.normalizedStreet,formattedAddress:existing.formattedAddress,neighborhood:'',city:'Atlanta',state:'GA',postalCode:'',placeId:'',jurisdiction:existing.jurisdiction||'unknown',streetSource:existing.streetSource||'legacy'}:await confirmRoad(serverDb,decoded.uid,lat,lng,body.streetName,body.streetSource);
+      const road=existing?.userId===decoded.uid&&existing.lat===lat&&existing.lng===lng?{streetName:existing.streetName,normalizedStreet:existing.normalizedStreet,formattedAddress:existing.formattedAddress,neighborhood:'',city:'Atlanta',state:'GA',postalCode:'',placeId:'',jurisdiction:existing.jurisdiction||'unknown',streetSource:existing.streetSource||'legacy'}:await confirmRoad(serverDb,decoded.uid,lat,lng,body.streetName,body.streetSource,body.observedIndependently);
       const txResult = await commitVerifiedSubmission(serverDb,{uid:decoded.uid,submissionId, mediaId, verificationId, requestedAction, targetPotholeId, lat, lng, actionType, coordinateSource, accuracyMeters, ...road, locationUserCorrected, notes, duplicateConfidence, candidatePotholeIds});
 
       const segmentResult=txResult.duplicateStatus==='pending_review'?null:await finishContribution(serverDb,submissionId).catch(()=>null);
@@ -643,7 +643,7 @@ async function startServer() {
       const items=await communityCache.get(kind,async()=>{
         const snap=kind==='potholes'?await db.collection('potholes').where('status','in',['accepted','reported','acknowledged','repaired']).limit(150).get():await db.collection('activityFeed').where('visibility','==','public').limit(40).get();
         const sorted=snap.docs.slice().sort((a,b)=>(b.data().createdAt?.toMillis?.()||0)-(a.data().createdAt?.toMillis?.()||0));
-        return kind==='potholes'?sorted.filter(d=>d.data().verificationStatus==='accepted').map(d=>publicPothole(d.id,d.data())):sorted.map(d=>publicActivity(d.id,d.data()));
+        return kind==='potholes'?sorted.filter(d=>d.data().verificationStatus==='accepted'&&isIndependentRecord(d.data())).map(d=>publicPothole(d.id,d.data())):sorted.map(d=>publicActivity(d.id,d.data()));
       });
       res.setHeader('Cache-Control','private, max-age=30');res.json({items});
     }catch{res.status(503).json({error:'Community information unavailable.'});}
@@ -1307,6 +1307,22 @@ async function startServer() {
     }
   });
 
+  // Fail closed until historical location records, derived corridors and reports are audited/rebuilt.
+  app.use(['/api/segments','/api/reports','/api/admin/segments','/api/admin/reports','/api/admin/email-drafts','/api/admin/overview','/api/admin/potholes'], (_req,res,next)=>{
+    if(!reportsEnabled()){res.status(503).json({error:'Community reporting is paused pending independent location provenance audit.'});return;}next();
+  });
+  app.get('/api/admin/reports/:reportId/export-data', async (req,res)=>{
+    if(!await requireAdmin(req,res))return;
+    res.set('Cache-Control','private, no-store');
+    try{const db=getServerFirestore()!;const id=req.params.reportId;if(!SAFE_ID_REGEX.test(id))throw new Error('Invalid report ID.');
+      const report=(await db.collection('reports').doc(id).get()).data();
+      const ids: string[]=report?.snapshotPotholeIds;
+      if(!Array.isArray(ids)||ids.length>100||ids.some(id=>typeof id!=='string'||!SAFE_ID_REGEX.test(id)))throw new Error('Invalid snapshot.');
+      const docs=await db.getAll(...ids.map(id=>db.collection('potholes').doc(id)));
+      const rows=exportRows(ids,docs.map(d=>d.data()||{}));
+      res.json({title:`PatchUp Report ${id}`,rows});
+    }catch{res.status(409).json({error:'Report export blocked: independent location provenance is incomplete.'});}
+  });
   app.get('/api/segments', async (req, res) => {
     if(!await requireAdmin(req,res))return;
     const serverDb = getServerFirestore();
@@ -1373,6 +1389,7 @@ async function startServer() {
     res.set('Cache-Control','private, no-store');
     const db = getServerFirestore()!;
     const section = req.params.section;
+    if(!reportsEnabled()&&['drafts','sent','history'].includes(section)){res.status(503).json({error:'Report history audit required.'});return;}
     const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
     if (cursor && !SAFE_ID_REGEX.test(cursor)) {res.status(400).json({error:'Invalid cursor.'});return;}
     try {
@@ -1391,9 +1408,9 @@ async function startServer() {
       const snapshot = await query.limit(26).get();
       const docs = snapshot.docs.slice(0,25);
       const items = docs.map(doc => { const d=doc.data(); return section === 'reviews' ? {
-        id:doc.id, streetName:d.streetName, formattedAddress:d.formattedAddress, mediaId:d.mediaId, lat:d.lat,lng:d.lng, aiSummary:d.aiSummary, targetPotholeId:d.reviewTargetPotholeId || '', candidatePotholeIds:Array.isArray(d.candidatePotholeIds)?d.candidatePotholeIds:[]
+        id:doc.id, streetName:isIndependentRecord(d)?d.streetName:'Location awaiting verification', formattedAddress:isIndependentRecord(d)?d.streetName:'', mediaId:d.mediaId, lat:d.lat,lng:d.lng, aiSummary:d.aiSummary, targetPotholeId:d.reviewTargetPotholeId || '', candidatePotholeIds:Array.isArray(d.candidatePotholeIds)?d.candidatePotholeIds:[]
       } : section === 'repairs' ? {
-        id:doc.id, streetName:d.streetName, formattedAddress:d.formattedAddress, mediaId:d.primaryMediaId, lat:d.lat, lng:d.lng, status:d.status
+        id:doc.id, streetName:isIndependentRecord(d)?d.streetName:'Location awaiting verification', formattedAddress:isIndependentRecord(d)?d.streetName:'', mediaId:d.primaryMediaId, lat:d.lat, lng:d.lng, status:d.status
       } : {id:doc.id,streetName:d.streetName,status:d.status,jurisdiction:d.jurisdiction,distinctPotholeCount:d.distinctPotholeCount,externalReference:d.externalReference,submissionChannel:d.submissionChannel}; });
       res.json({items,nextCursor:snapshot.size>25?docs[docs.length-1].id:null});
     } catch {res.status(500).json({error:'Unable to load admin queue.'});}
@@ -1409,7 +1426,10 @@ async function startServer() {
       if (!report || !['awaiting_admin_review','ready_for_submission','unable_to_submit'].includes(report.status)) {res.status(404).json({error:'Draft no longer pending.'});return;}
       const ids=Array.isArray(report.snapshotPotholeIds)?[...new Set<string>(report.snapshotPotholeIds.filter((id:unknown)=>typeof id==='string'&&SAFE_ID_REGEX.test(id)))].slice(0,5):[];
       const photos=ids.length?await db.getAll(...ids.map(id=>db.collection('potholes').doc(id))):[];
-      const draft=buildReportDraft(report,photos.filter(p=>p.exists).map(p=>({...p.data(),potholeId:p.id})),(process.env.PATCHUP_REPORT_FROM_EMAIL||'').trim());
+      if(photos.length!==ids.length||photos.some(p=>!isIndependentRecord(p.data()))){res.status(409).json({error:'Report location provenance is incomplete.'});return;}
+      const safeStreet=String(photos[0]?.data()?.streetName||'');
+      if(!safeStreet||photos.some(p=>normalizeStreetName(String(p.data()?.streetName||''))!==normalizeStreetName(safeStreet))){res.status(409).json({error:'Independent street match required for every report member.'});return;}
+      const draft=buildReportDraft({...report,streetName:safeStreet},photos.filter(p=>p.exists).map(p=>({...p.data(),potholeId:p.id})),(process.env.PATCHUP_REPORT_FROM_EMAIL||'').trim());
       const media=draft.attachments.length?await db.getAll(...draft.attachments.map(a=>db.collection('mediaObjects').doc(a.mediaId))):[];
       const attachments=[];
       for(const [i,a] of draft.attachments.entries()){
@@ -1750,6 +1770,10 @@ async function startServer() {
         res.status(404).json({ error: 'Community report not found.' });
         return;
       }
+      const ids=snap.data()?.snapshotPotholeIds;
+      if(!Array.isArray(ids)||ids.length>100||ids.some((id:unknown)=>typeof id!=='string'||!SAFE_ID_REGEX.test(id)))throw new Error('Invalid report snapshot.');
+      const members=await serverDb.getAll(...ids.map((id:string)=>serverDb.collection('potholes').doc(id)));
+      exportRows(ids,members.map(d=>d.data()||{}));
       await reportRef.update({
         googleSheetUrl: spreadsheetUrl.slice(0, 512),
         updatedAt: FieldValue.serverTimestamp(),
