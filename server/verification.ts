@@ -1,8 +1,9 @@
+import { aiBudgetWindows, budgetAvailable, APPROVED_GEMINI_MODEL } from './aiBudget.ts';
 import { randomUUID } from 'node:crypto';
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { geminiClassifier, type ImageClassifier, type ProviderResult } from './gemini.ts';
 import { prepareImage } from './imageBytes.ts';
-import { autoAcceptEnabled, boundedInt, classifyObservation, hashBytes, modelId, PROMPT_VERSION, SCHEMA_VERSION, publicSummary, releaseId, VALID_MS, validateObservation, type VerificationRecord, type Failure } from './verificationPolicy.ts';
+import { autoAcceptEnabled, classifyObservation, hashBytes, modelId, PROMPT_VERSION, SCHEMA_VERSION, publicSummary, releaseId, VALID_MS, validateObservation, type VerificationRecord, type Failure } from './verificationPolicy.ts';
 
 export { authorizeVerification } from './verificationPolicy.ts';
 export { prepareImage } from './imageBytes.ts';
@@ -11,7 +12,7 @@ export function publicVerification(v: VerificationRecord) {
   return { verificationId:v.verificationId, mediaId:v.mediaId, verificationState:v.verificationState, classificationDecision:decision,
     status:v.verificationState === 'completed'?'completed':'unavailable', available:v.verificationState==='completed', model:v.model,
     isRoadDefect:decision==='verified', severityLabel:'unclassified', confidence:0,
-    summary:v.classificationDecision==='verified'&&decision==='needs_review'?'A possible pothole was detected. Automatic acceptance is disabled; send for review.':publicSummary(v.observation),
+    summary:v.failureCategory==='quota'?'Photo verification quota reached. Try again later or request manual review.':v.classificationDecision==='verified'&&decision==='needs_review'?'A possible pothole was detected. Automatic acceptance is disabled; send for review.':publicSummary(v.observation),
     duplicateLikelihood:'not_compared', ...(v.failureCategory?{error:v.failureCategory}:{}), expiresAtMs:v.expiresAtMs };
 }
 
@@ -23,11 +24,7 @@ export async function verifyImage(db: Firestore, p: {uid:string; mediaId:string;
   const verificationId='ver_'+hashBytes(JSON.stringify([p.uid,p.mediaId,prepared.imageHash,releaseId(model)]));
   const ref=db.collection('imageVerifications').doc(verificationId);
   const lease=randomUUID();
-  const day=new Date(now).toISOString().slice(0,10), minute=Math.floor(now/60_000);
-  const limits=[{id:`day_${day}`,max:boundedInt(process.env.PATCHUP_AI_DAILY_LIMIT,100,10000),expires:now+2*VALID_MS},
-    {id:`user_${hashBytes(p.uid)}_${day}`,max:boundedInt(process.env.PATCHUP_AI_USER_DAILY_LIMIT,10,1000),expires:now+2*VALID_MS,ownerId:p.uid},
-    {id:`month_${day.slice(0,7)}`,max:boundedInt(process.env.PATCHUP_AI_MONTHLY_LIMIT,1000,100000),expires:now+62*VALID_MS},
-    {id:`minute_${minute}`,max:boundedInt(process.env.PATCHUP_AI_MINUTE_LIMIT,10,1000),expires:now+2*VALID_MS}];
+  const limits=aiBudgetWindows(p.uid,now);
   const budgetRefs=limits.map(l=>db.collection('verificationBudgets').doc(l.id));
   const circuitRef=db.collection('verificationBudgets').doc('circuit');
   const makeRecord=(result:ProviderResult, stamp=Date.now()): VerificationRecord=>{
@@ -42,14 +39,14 @@ export async function verifyImage(db: Firestore, p: {uid:string; mediaId:string;
     const existing=old.data() as VerificationRecord|undefined;
     if(existing?.consumedSubmissionId) throw new Error('This photo was already submitted.');
     if(existing?.verificationState==='pending'&&now-existing.createdAtMs<60_000) return {kind:'busy' as const};
-    if(process.env.PATCHUP_IMAGE_AI_ENABLED!=='true'||!p.consent) {const v=makeRecord({ok:false,failure:'disabled'},now);persist(tx,v);return {kind:'done' as const,v};}
+    if(process.env.PATCHUP_IMAGE_AI_ENABLED!=='true'||!p.consent||model!==APPROVED_GEMINI_MODEL) {const v=makeRecord({ok:false,failure:'disabled'},now);persist(tx,v);return {kind:'done' as const,v};}
     const c=cache.data() as CacheRecord|undefined;
     if(c?.state==='pending'&&c.leaseUntilMs>now) return {kind:'busy' as const};
     if(c?.result && ((c.state==='completed'&&c.expiresAtMs>now)||(c.state==='unavailable'&&c.retryAfterMs>now))) {
       const v=makeRecord(c.result,now); if(c.state==='completed') v.expiresAtMs=Math.min(v.expiresAtMs,c.expiresAtMs); persist(tx,v); return {kind:'done' as const,v};
     }
     const circuit=budgets[limits.length].data();
-    if(Number(circuit?.openUntilMs||0)>now || limits.some((l,i)=>Number(budgets[i].data()?.count||0)>=l.max)) {
+    if(Number(circuit?.openUntilMs||0)>now || limits.some((l,i)=>!budgetAvailable(budgets[i].exists?budgets[i].data()?.count:0,l.max))) {
       const v=makeRecord({ok:false,failure:'quota'},now);persist(tx,v);return {kind:'done' as const,v};
     }
     // Read phase above; reserve all attempts durably before making an external call.

@@ -1,0 +1,40 @@
+# TEMPLATE ONLY: replace IMAGE_URI with a reviewed built image digest.
+# No public IAM grant, billing change or secret creation is performed by this file.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: patchup
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '1'
+        run.googleapis.com/cpu-throttling: 'true'
+    spec:
+      serviceAccountName: patchup-backend@patchup-fff96.iam.gserviceaccount.com
+      containerConcurrency: 10
+      timeoutSeconds: 60
+      containers:
+      - image: IMAGE_URI
+        ports:
+        - containerPort: 3000
+        resources:
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: PATCHUP_IMAGE_AI_ENABLED
+          value: 'false'
+        - name: PATCHUP_AUTO_ACCEPT
+          value: 'false'
+        - name: PATCHUP_GOOGLE_GEOCODING_ENABLED
+          value: 'false'
+        - name: PATCHUP_GOOGLE_GEOCODING_STORAGE_APPROVED
+          value: 'false'
+        - name: PATCHUP_CITY_ROADS_ENABLED
+          value: 'false'
+        - name: PATCHUP_EMAIL_SENDING_ENABLED
+          value: 'false'

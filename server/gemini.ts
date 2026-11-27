@@ -1,3 +1,4 @@
+import { APPROVED_GEMINI_MODEL } from './aiBudget.ts';
 import { geminiInlinePhoto } from './photoPrivacy.ts';
 import { GoogleGenAI, Type } from '@google/genai';
 import { CATEGORIES, QUALITIES, modelId, validateObservation, type Observation, type Failure } from './verificationPolicy.ts';
@@ -25,12 +26,12 @@ export async function buildGeminiPhotoRequest(bytes:Buffer,mime:string,model:str
 }
 export const geminiClassifier: ImageClassifier = {
   async classify({bytes,mime,model}) {
-    if(process.env.PATCHUP_GEMINI_DATA_MODE!=='paid')return {ok:false,failure:'disabled'};
+    if(model!==APPROVED_GEMINI_MODEL || process.env.PATCHUP_GEMINI_DATA_MODE!=='paid')return {ok:false,failure:'disabled'};
     const key=process.env.GEMINI_API_KEY?.trim();
     if(!key || key==='MY_GEMINI_API_KEY') return {ok:false,failure:'unconfigured'};
     const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),15_000);
     try {
-      const ai=new GoogleGenAI({apiKey:key});
+      const ai=new GoogleGenAI({apiKey:key,vertexai:false,httpOptions:{retryOptions:{attempts:1}}});
       const response=await ai.models.generateContent(await buildGeminiPhotoRequest(bytes,mime,model,controller.signal));
       let observation: Observation;
       try {observation=validateObservation(JSON.parse(response.text??''));} catch {return {ok:false,failure:'invalid_response'};}
