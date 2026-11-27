@@ -8,7 +8,7 @@ PatchUp runs as a unified full-stack Node.js/Express application (`server.ts`) s
 
 - **Frontend**: React + TypeScript + Tailwind CSS + `vite-plugin-pwa` (Workbox service worker, `manifest.webmanifest`, offline shell fallback).
 - **Backend**: Express (`server.ts`) + Firebase Admin SDK (`firebase-admin/app`, `firebase-admin/auth`, `firebase-admin/firestore`) + modular domain engines in `server/`:
-  - `server/geo.ts`: Haversine distance, street normalization, ATLDOT/GDOT heuristic jurisdiction classification, 29-day cached reverse geocoding.
+  - `server/geo.ts`: Haversine distance, street normalization, ATLDOT/GDOT heuristic jurisdiction classification, geographic distance and duplicate candidate scoring.
   - `server/segments.ts`: Road-aligned corridor grouping, transactional 5-distinct-pothole threshold & report-cycle engine, admin overrides, and audit logging.
   - `server/social.ts`: Friendships, server-maintained leaderboards, 7 community achievements, and notifications.
   - `server/games.ts`: Isolated entertainment minigame score validation & `/gameStats` persistence.
@@ -27,7 +27,6 @@ Never commit `.env`, service account JSON files, or API keys to source control. 
 | --- | --- | --- | --- |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Server only | Secure development environment only | Optional development Firebase credential; rejected on Cloud Run |
 | `VITE_GOOGLE_MAPS_API_KEY` | Browser bundle | HTTP-referrer restricted Cloud API key | Maps JavaScript API (`MapView`, `PinPickerMap`) |
-| `GOOGLE_MAPS_SERVER_API_KEY` | Server only | API-restricted key in Secret Manager | Server-side Reverse Geocoding (`geocode.googleapis.com`) |
 | `GEMINI_API_KEY` | Server only | Secret Manager / AI Studio Secrets | Optional strict pothole observation (`@google/genai`); see `docs/IMAGE_VERIFICATION.md` |
 | `GEMINI_MODEL` | Server only | Env var (e.g. `gemini-3.5-flash-lite`) | Verifiable Gemini model identifier |
 | `PATCHUP_ADMIN_EMAILS` | Server only | Env var | Authoritative comma-separated allowlist for all application admin operations |
@@ -73,7 +72,7 @@ Inspect `GET /api/health` after startup and confirm:
 ### Cloud Run Deployment (Recommended Full-Stack Runtime)
 1. Ensure `npm run build` succeeds and `dist/` contains `index.html`, `manifest.webmanifest`, and `sw.js`.
 2. Build and deploy container/source to Cloud Run with `--port=3000` and `NODE_ENV=production`.
-3. Select `patchup-backend@patchup-fff96.iam.gserviceaccount.com` as the Cloud Run runtime service account. Use ADC, not a downloaded key. Attach only required non-identity secrets (for example `GOOGLE_MAPS_SERVER_API_KEY` and optional `GEMINI_API_KEY`) via Secret Manager. See [production identity and admin access](docs/PRODUCTION_IDENTITY.md).
+3. Select `patchup-backend@patchup-fff96.iam.gserviceaccount.com` as the Cloud Run runtime service account. Use ADC, not a downloaded key. Attach only required non-identity secrets (for example the optional `GEMINI_API_KEY`) via Secret Manager. See [production identity and admin access](docs/PRODUCTION_IDENTITY.md).
 4. Confirm Firebase Authentication Authorized Domains includes the deployed HTTPS origin.
 
 ### Diagnosing HTML returned by an API request
@@ -114,7 +113,9 @@ gcloud firestore export gs://<your-backup-bucket>/patchup-$(date +%F) \
 ```
 
 ### Cost & Quota Guardrails
-- **Geocoding Cache**: Reverse geocoding results are cached in `/geocodeCache` for 29 days (`< 30`-day Maps ToS window) to eliminate duplicate API calls for unchanged coordinates.
+
+Google Maps JavaScript remains available for map display and pin selection. The separate server-side Google Geocoding integration is not required.
+- **Street identification**: Uses reporter-observed street names and optional Atlanta street centerline data. No Google reverse geocoding requests or shared Google address cache are required.
 - **Gemini Guardrail**: Gemini runs only after explicit consent during capture, if `PATCHUP_IMAGE_AI_ENABLED=true`—never on map pan, feed load, or corridor listing.
 - **Rate Limiting**: Express rate limits protect `/api/geocode/reverse`, `/api/potholes/analyze`, `/api/potholes/submit`, `/api/games/score`, `/api/friends/*`, and `/api/admin/*`.
 - **Spark Tier Media Hygiene**: `/mediaObjects` caps binaries at `<= 400KB` (`<= 1280px` max edge). Monitor total Firestore document storage in the Firebase Console against Spark quotas.
