@@ -1,0 +1,19 @@
+# Mandatory pothole photo privacy protection
+
+Home → Take a Pothole Photo continues to extract GPS locally and ask the reporter to review the image. The backend removes image metadata, calls Google Cloud Sensitive Data Protection to obscure detected faces and license plates, decodes and re-encodes the returned image, and stores only that result and a thumbnail derived from it. Gemini verification, submission, manual approval, media delivery and ATL311 email attachments reject pothole media without server-recorded redaction proof. Proof records completion of the configured detector request, not a guarantee that every sensitive detail was detected. Profile avatars are unchanged. No new user-facing feature or redesign.
+
+There is no redaction activation flag. On the supported Cloud Run runtime the integration is mandatory; outside Cloud Run and in emulator environments real pothole upload fails closed. The existing separate Gemini paid-processing and benchmark approval gates remain unchanged. Existing consent must be renewed because photo processing disclosure changed. Older unprocessed images are not deleted but are no longer served by the media route or offered as email attachments. Existing map records may remain visible without a photograph; pending older images cannot be approved until replaced or safely remediated. Do not invent redaction proof for legacy records. No migration of those records is included.
+
+## Deployment prerequisites (not performed by this patch)
+
+- Link billing only after owner authorization and budget review. Enable `dlp.googleapis.com` and grant the dedicated `patchup-backend@patchup-fff96.iam.gserviceaccount.com` runtime identity the permission `dlp.content.redact` using a narrowly scoped role, plus any required service usage permission. Do not create/download a private key. Verify the identity and effective permissions before the live test.
+- DLP regional endpoint: `projects/patchup-fff96/locations/us/image:redact`. Face detector `OBJECT_TYPE/PERSON/FACE` is documented as Preview in the US multi-region. License plates use `OBJECT_TYPE/LICENSE_PLATE`. Detected regions receive opaque black rectangles. A successful response may be unchanged when nothing is detected. Validate both detectors together with authorized, non-sensitive test images, including small/angled plates and faces, failure responses, and the saved image and thumbnail. Keep public deployment off until detection and manual review are acceptable.
+- Application-wide limits: 10 attempts/minute, 100/day, 1,000/month, 10/user/day and 400,000,000 input bytes/month, with UTC windows and atomic reservations before provider calls. Failed provider attempts count; no automatic DLP provider retries. Client reattempts may reserve additional allowance. These are application limits, not a billing guarantee. Configure provider-side controls and billing alerts separately. Deploy Firestore rules with the app; server-only counters cannot be written by clients.
+- The existing CLI benchmark is explicitly for reviewed, pre-redacted non-sensitive test fixtures only; it requires `--confirm-pre-redacted-non-sensitive`. It does not perform DLP. Do not use it with ordinary user photos. The classification release ID changes; previous benchmark approval cannot activate automatic acceptance of this release.
+
+Official references:
+- https://docs.cloud.google.com/sensitive-data-protection/docs/redacting-sensitive-data-images
+- https://docs.cloud.google.com/sensitive-data-protection/docs/reference/rest/v2/projects.locations.image/redact
+- https://docs.cloud.google.com/sensitive-data-protection/docs/release-notes
+
+The patch does not change Cloud billing, API enablement, IAM, actual database records or deployment. Mock tests verify the request, returned image and failure behavior; only a live test can validate detector availability and accuracy.

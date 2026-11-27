@@ -1,3 +1,4 @@
+import { hasRedaction } from './photoRedaction.ts';
 import { LOCATION_POLICY_VERSION, isIndependentRecord, requireIndependentSource } from './locationPolicy.ts';
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { haversineMeters, isValidCoordinatePair, isWithinAtlantaMetro, type JurisdictionType } from './geo.ts';
@@ -42,6 +43,7 @@ export async function commitVerifiedSubmission(serverDb:Firestore,p:SubmissionIn
         const mediaData=mediaSnap.data()!;
         if(mediaId.startsWith('avt_'))throw new Error('Profile photos cannot be submitted.');
         const prepared=mediaBinding(mediaData);
+        if(!hasRedaction(mediaData,prepared.imageHash))throw new Error('Photo needs automatic privacy protection. Upload it again.');
         const day=new Date().toISOString().slice(0,10);
         const submitBudgetRef=serverDb.collection('verificationBudgets').doc(`sub_${hashBytes(uid)}_${day}`);
         const verificationRef=serverDb.collection('imageVerifications').doc(verificationId);
@@ -269,6 +271,7 @@ export async function commitPendingReview(serverDb:Firestore,actor:{uid:string;e
         const [contributorSnap, provisionalSnap, mediaSnap] = await Promise.all([tx.get(contributorRef),tx.get(provisionalPotholeRef),tx.get(serverDb.collection('mediaObjects').doc(String(subData.mediaId)))]);
         if(!provisionalSnap.exists || provisionalSnap.data()?.status!=='provisional' || !mediaSnap.exists || mediaSnap.data()?.ownerId!==subData.userId) throw new Error('Pending photo or pothole is no longer available.');
         const reviewImage=mediaBinding(mediaSnap.data()!);
+        if(!hasRedaction(mediaSnap.data(),reviewImage.imageHash))throw new Error('Photo needs automatic privacy protection before approval.');
         if(subData.imageHash && reviewImage.imageHash!==subData.imageHash) throw new Error('Pending photo changed.');
         const claimRef=serverDb.collection('imageClaims').doc(reviewImage.contentHash);
         const claimSnap=await tx.get(claimRef);

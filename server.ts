@@ -1,3 +1,4 @@
+import { hasRedaction, redactionEnabled } from './server/photoRedaction.ts';
 import { COMMUNITY_NOTIFICATION_TYPES, isCommunityNotification } from './src/lib/communityNotifications.ts';
 import { isIndependentRecord, reportsEnabled, exportRows, isNewReportGroup } from './server/locationPolicy.ts';
 import { SharedReadCache } from './server/sharedReadCache.ts';
@@ -348,7 +349,7 @@ async function startServer() {
         process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
       ),
       geminiModel: getConfiguredGeminiModel(),
-      imageAiEnabled:process.env.PATCHUP_IMAGE_AI_ENABLED==='true'&&process.env.PATCHUP_GEMINI_DATA_MODE==='paid',
+      imageAiEnabled:redactionEnabled()&&process.env.PATCHUP_IMAGE_AI_ENABLED==='true'&&process.env.PATCHUP_GEMINI_DATA_MODE==='paid',
       imageAutoAcceptEnabled:autoAcceptEnabled(),
     });
   });
@@ -496,7 +497,7 @@ async function startServer() {
     if(!await requireAccountConsent(db,decoded.uid,res))return;
     if(req.body?.privacyConfirmed!==true){res.status(400).json({error:'Review the photo for personal details before uploading.'});return;}
     const rate=checkRateLimit({scope:'photo_upload_uid',key:decoded.uid,maxRequests:6,windowMs:60_000});if(!rate.allowed){res.status(429).json({error:'Too many uploads. Please wait.'});return;}
-    try{const result=await storeSanitizedUpload(db,{uid:decoded.uid,mediaId:String(req.body?.mediaId||''),bytes:decodeUpload(req.body?.data),mime:String(req.body?.contentType||'')});res.status(201).json(result);}catch{res.status(400).json({error:'Photo could not be saved. Check the format, upload allowance, or try again.'});}
+    try{const result=await storeSanitizedUpload(db,{uid:decoded.uid,mediaId:String(req.body?.mediaId||''),bytes:decodeUpload(req.body?.data),mime:String(req.body?.contentType||'')});res.status(201).json(result);}catch{res.status(400).json({error:'Photo could not be saved. Privacy protection may be unavailable, or the upload allowance or format may be invalid. Try again later.'});}
   });
 
   app.post('/api/admin/media-maintenance',async(req,res)=>{
@@ -512,14 +513,14 @@ async function startServer() {
     const mediaId = typeof req.body?.mediaId === 'string' ? req.body.mediaId : '';
     if (!SAFE_ID_REGEX.test(mediaId)) { res.status(400).json({error:'Invalid media ID.'}); return; }
     if (!(await requireAccountConsent(serverDb, decoded.uid, res))) return;
-    if (process.env.PATCHUP_IMAGE_AI_ENABLED !== 'true' || process.env.PATCHUP_GEMINI_DATA_MODE !== 'paid') { res.status(503).json({error:'Photo verification is temporarily disabled.'}); return; }
+    if (!redactionEnabled() || process.env.PATCHUP_IMAGE_AI_ENABLED !== 'true' || process.env.PATCHUP_GEMINI_DATA_MODE !== 'paid') { res.status(503).json({error:'Photo verification is temporarily disabled.'}); return; }
     const rate = checkRateLimit({scope:'verification_uid',key:decoded.uid,maxRequests:3,windowMs:60_000});
     if (!rate.allowed) {res.setHeader('Retry-After',String(rate.retryAfterSeconds));res.status(429).json({error:'Please wait before checking another photo.'});return;}
     try {
       const m=(await serverDb.collection('mediaObjects').doc(mediaId).get()).data();
-      if (!isReadableMedia(m) || m.ownerId !== decoded.uid || m.privacyVersion!==PHOTO_PRIVACY_VERSION || !mediaId.startsWith('med_')) {res.status(404).json({error:'Your uploaded photo was not found.'});return;}
+      if (!isReadableMedia(m) || !hasRedaction(m) || m.ownerId !== decoded.uid || m.privacyVersion!==PHOTO_PRIVACY_VERSION || !mediaId.startsWith('med_')) {res.status(404).json({error:'Your uploaded photo was not found.'});return;}
       const media=await loadMediaBytes(mediaId,m,'evidence','analysis');
-      const record=await verifyImage(serverDb,{uid:decoded.uid,mediaId,bytes:media.buffer,mime:media.contentType,consent:true});
+      const record=await verifyImage(serverDb,{uid:decoded.uid,mediaId,bytes:media.buffer,mime:media.contentType,consent:true,redactedImageHash:m.redactedImageHash});
       res.setHeader('Cache-Control','no-store');res.json(publicVerification(record));
     } catch (err) {
       const message=err instanceof Error?err.message:'';
@@ -703,7 +704,7 @@ async function startServer() {
     const db=getServerFirestore();if(!db||!adminFirestoreReady){res.status(503).json({error:'Media service unavailable.'});return;}
     try{
       const media=(await db.collection('mediaObjects').doc(mediaId).get()).data();
-      if(!isReadableMedia(media)){res.status(404).json({error:'Media not found.'});return;}
+      if(!isReadableMedia(media)||(!mediaId.startsWith('avt_')&&!hasRedaction(media))){res.status(404).json({error:'Media not found.'});return;}
       let allowed=false;
       if(req.headers.authorization){const decoded=await verifyBearerToken(req,res,false,true);if(!decoded)return;allowed=decoded.uid===media.ownerId||Boolean(adminApp&&await authorizeAdmin(getAdminAuth(adminApp),decoded));}
       if(!allowed){
@@ -1450,7 +1451,7 @@ async function startServer() {
       for(const [i,a] of draft.attachments.entries()){
         const m=media[i]?.data(); const p=photos.find(p=>p.id===a.potholeId)?.data(); const type=String(m?.contentType||'');
         let valid=false;
-        try {if(isReadableMedia(m)&&m.ownerId===p?.primaryContributorUid){await loadMediaBytes(a.mediaId,m);valid=true;}}catch{/* missing or malformed photo */}
+        try {if(isReadableMedia(m)&&hasRedaction(m)&&m.ownerId===p?.primaryContributorUid){await loadMediaBytes(a.mediaId,m);valid=true;}}catch{/* missing or malformed photo */}
         if(!valid) draft.warnings.push(`Pothole ${a.number}: image unavailable.`);
         const ext='jpg';
         if(m?.privacyVersion!==PHOTO_PRIVACY_VERSION)draft.warnings.push(`Pothole ${a.number}: older photo; review visible personal details before sharing.`);

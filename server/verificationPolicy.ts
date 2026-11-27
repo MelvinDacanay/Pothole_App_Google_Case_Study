@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const PROMPT_VERSION = 'atldot-pothole-v3-pixel-v1';
+export const PROMPT_VERSION = 'atldot-pothole-v3-pixel-redacted-v1';
 export const SCHEMA_VERSION = '3';
 export const CATEGORIES = ['pothole', 'depression', 'cave_in', 'alligator_cracking', 'utility_defect', 'crack', 'road_patch', 'other_road_damage', 'not_road', 'unclear'] as const;
 export const QUALITIES = ['usable', 'limited'] as const;

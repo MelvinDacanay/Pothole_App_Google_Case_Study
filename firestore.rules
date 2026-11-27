@@ -264,6 +264,7 @@ service cloud.firestore {
 
     // Isolated Spark-tier binary media store (single-doc get only; no list scraping)
     match /mediaObjects/{mediaId} { allow read, write: if false; }
+    match /redactionBudgets/{id} { allow read, write: if false; }
     match /mediaBudgets/{id} { allow read, write: if false; }
     match /roadLookups/{id} { allow read, write: if false; }
     match /geocodingBudgets/{id} { allow read, write: if false; }

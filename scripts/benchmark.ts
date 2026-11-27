@@ -10,7 +10,7 @@ import { classifyObservation, modelId, releaseId, boundedInt } from '../server/v
 type Label='pothole'|'not_pothole'|'unclear';
 type Row={id:string;file:string;label:Label;group:string;split:'dev'|'holdout';stratum:string};
 const args=process.argv.slice(2), value=(name:string)=>args[args.indexOf(name)+1];
-if(!args.includes('--allow-live')||!args.includes('--manifest')||!args.includes('--output')) throw new Error('Usage: npm run benchmark -- --allow-live --manifest path/to/manifest.json --output results.json [--split dev|holdout] [--limit 50]. Sends approved non-sensitive test photographs to Gemini.');
+if(!args.includes('--confirm-pre-redacted-non-sensitive')||!args.includes('--allow-live')||!args.includes('--manifest')||!args.includes('--output')) throw new Error('Usage: npm run benchmark -- --allow-live --confirm-pre-redacted-non-sensitive --manifest path/to/manifest.json --output results.json [--split dev|holdout] [--limit 50]. Sends approved non-sensitive test photographs to Gemini.');
 if(!process.env.GEMINI_API_KEY||process.env.GEMINI_API_KEY==='MY_GEMINI_API_KEY') throw new Error('Configure GEMINI_API_KEY locally.');
 const manifest=path.resolve(value('--manifest')), out=path.resolve(value('--output')), split=args.includes('--split')?value('--split'):'dev';
 if(!['dev','holdout'].includes(split))throw new Error('Invalid split.');
@@ -31,7 +31,7 @@ for(const row of rows){
 if(!data.length)throw new Error('No photos for selected split.');
 const delay=boundedInt(process.env.BENCHMARK_DELAY_MS,6500,60000);const results:Array<{id:string;label:Label;stratum:string;decision:string;category:string|null;latencyMs:number;inputTokens:number|null;outputTokens:number|null;failure:string|null}>=[];
 for(const {row,image} of data.slice(0,limit)){
- const start=performance.now();const clean=await sanitizePhoto(image.bytes,image.mime,dimension);const r=await geminiClassifier.classify({bytes:clean.bytes,mime:clean.mime,model});const latencyMs=Math.round(performance.now()-start);
+ const start=performance.now();const clean=await sanitizePhoto(image.bytes,image.mime,dimension);const r=await geminiClassifier.classify({bytes:clean.bytes,mime:clean.mime,model,redactedImageHash:clean.imageHash});const latencyMs=Math.round(performance.now()-start);
  results.push({id:row.id,label:row.label,stratum:row.stratum,decision:r.ok?classifyObservation(r.observation):'unavailable',category:r.ok?r.observation.category:null,latencyMs,inputTokens:r.ok?r.inputTokens:null,outputTokens:r.ok?r.outputTokens:null,failure:r.ok===false?r.failure:null});
  if(r.ok===false&&['quota','unconfigured'].includes(r.failure))break;
  if(results.length<Math.min(data.length,limit)&&delay)await new Promise(r=>setTimeout(r,delay));

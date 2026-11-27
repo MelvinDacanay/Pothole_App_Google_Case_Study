@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'rea
 import type { User } from 'firebase/auth';
 import { readApiJson } from '../lib/apiResponse';
 
-const VERSION = '2026-11-27-v3-location';
+const VERSION = '2026-11-27-v4-redaction';
 const statements = [
   'I am at least 18 years old.',
-  'I understand that Gemini will be used to assess and verify if a photo uploaded is appropriate. I will avoid including sensitive information or other personal details.',
+  'I understand that Google Sensitive Data Protection will attempt to obscure faces and license plates before Gemini is used to assess and verify if a photo uploaded is appropriate. I will avoid including sensitive information or other personal details.',
   'I agree to the PatchUp terms of use, including the applicable Google Maps terms.',
 ] as const;
 
@@ -69,7 +69,7 @@ export function AccountConsentGate({user, signOut, children}: {user: User; signO
     {status === 'required' && <dialog ref={dialogRef} aria-labelledby="consent-title" onCancel={e=>e.preventDefault()} className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl border-2 border-[#17231D] bg-[#fffaf0] p-6 sm:p-8 text-[#17231D] shadow-xl backdrop:bg-[#17231D]/65">
       <form onSubmit={submit} className="space-y-5">
         <img src="/patchup-logo.png" alt="PatchUp" className="w-20 h-auto" />
-        <div><p className="text-xs font-bold tracking-widest uppercase">Before you get started</p><h1 id="consent-title" className="font-display text-2xl mt-2">Welcome to PatchUp</h1><p className="text-sm mt-2">Please confirm all three statements to access the app.</p><p className="text-sm mt-2">We remove embedded photo metadata before saving or using Gemini. You confirm the pothole’s location separately. Approved images and road locations are public and may be shared with ATL311; your account details and notes are not included in those reports. Location is requested only when needed. <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="underline">Privacy notice</a> · <a href="/terms.html" target="_blank" rel="noopener noreferrer" className="underline">Terms of use</a></p></div>
+        <div><p className="text-xs font-bold tracking-widest uppercase">Before you get started</p><h1 id="consent-title" className="font-display text-2xl mt-2">Welcome to PatchUp</h1><p className="text-sm mt-2">Please confirm all three statements to access the app.</p><p className="text-sm mt-2">We remove embedded photo metadata and send the cleaned photo to Google Sensitive Data Protection to attempt face and license plate redaction before saving or using Gemini. Detection can miss details; review and crop your photo first. You confirm the pothole’s location separately. Approved images and road locations are public and may be shared with ATL311; your account details and notes are not included in those reports. Location is requested only when needed. <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="underline">Privacy notice</a> · <a href="/terms.html" target="_blank" rel="noopener noreferrer" className="underline">Terms of use</a></p></div>
         {([age,consent,terms] as const).map((checked,i)=> <label key={i} className={`flex items-start gap-3 rounded-xl border p-3 text-sm leading-relaxed cursor-pointer ${attempted&&!checked?'border-red-600 text-red-700 bg-red-50':'border-[#b6ac98]'}`}>
           <input ref={i===0?ageRef:i===1?consentRef:termsRef} type="checkbox" checked={checked} onChange={e=>i===0?setAge(e.target.checked):i===1?setConsent(e.target.checked):setTerms(e.target.checked)} disabled={saving} aria-invalid={attempted&&!checked} className="mt-1 h-5 w-5 shrink-0 accent-[#17231D]" />
           <span>{statements[i]}</span>
