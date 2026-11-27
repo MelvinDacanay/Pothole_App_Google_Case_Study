@@ -1,10 +1,10 @@
 import React from 'react';
-import { Award, Camera, Gamepad2, Home, User as UserIcon } from 'lucide-react';
+import { Award, Camera, Gamepad2, Home, ShieldCheck, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { OfflineBanner } from './OfflineBanner';
 
-export type NavTab = 'home' | 'map' | 'capture' | 'leaderboard' | 'arcade' | 'profile';
+export type NavTab = 'home' | 'map' | 'capture' | 'leaderboard' | 'arcade' | 'profile' | 'admin';
 
 interface AppShellProps {
   activeTab: NavTab;
@@ -28,7 +28,7 @@ const MOBILE_NAV_ITEMS: typeof DESKTOP_NAV_ITEMS = [
 ];
 
 export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, children }) => {
-  const { user, publicProfile, isSigningIn, signIn } = useAuth();
+  const { user, publicProfile, isSigningIn, signIn, isAdmin } = useAuth();
 
   return (
     <div className="patchup-shell min-h-dvh flex flex-col bg-[#F7F7F8] text-[#3A3535]">
@@ -52,7 +52,7 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
           </button>
 
           <nav className="flex items-center gap-3 xl:gap-6" aria-label="Primary">
-            {DESKTOP_NAV_ITEMS.map((item) => {
+            {(isAdmin ? [...DESKTOP_NAV_ITEMS, {id: 'admin' as NavTab,label: 'Admin Hub',mobileLabel: 'Admin Hub',icon:ShieldCheck}] : DESKTOP_NAV_ITEMS).map((item) => {
               const isActive = activeTab === item.id;
               const isCapture = item.id === 'capture';
               return (
@@ -161,8 +161,8 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
         aria-label="Mobile navigation"
         className="mobile-dock lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E8DFC5] pb-safe px-safe"
       >
-        <div className="grid grid-cols-5 items-center h-16 px-1">
-          {MOBILE_NAV_ITEMS.map((item) => {
+        <div className={`grid ${isAdmin ? 'grid-cols-6' : 'grid-cols-5'} items-center h-16 px-1`}>
+          {(isAdmin ? [...MOBILE_NAV_ITEMS, {id: 'admin' as NavTab,label: 'Admin Hub',mobileLabel: 'Admin Hub',icon:ShieldCheck}] : MOBILE_NAV_ITEMS).map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             const isCapture = item.id === 'capture';

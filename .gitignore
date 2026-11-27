@@ -8,3 +8,12 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Never archive credentials or real benchmark photos
+*service-account*.json
+*service_account*.json
+credentials*.json
+*.pem
+*.key
+benchmark/photos/
+benchmark/results*.json

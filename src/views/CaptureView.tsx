@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../components/ProtectedImage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -8,7 +9,6 @@ import {
   MapPin,
   RefreshCw,
   RotateCcw,
-  Sparkles,
   Upload,
   X,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import { extractExifGpsFromFile } from '../lib/exif';
 import {
   CompressedImageResult,
   compressImageForUpload,
+  cropPhoto,
   uploadImageWithRetry,
 } from '../lib/imageUpload';
 import {
@@ -31,8 +32,6 @@ import {
   MapsClientConfig,
   SeverityLabel,
 } from '../lib/maps';
-import { consumePendingCapture } from '../lib/pendingCapture';
-import { OfficialReportPanel } from '../components/OfficialReportPanel';
 
 interface CaptureViewProps {
   preselectedPothole: {
@@ -58,11 +57,14 @@ interface ReverseGeocodeResponse {
   postalCode?: string;
   placeId?: string;
   jurisdiction: 'atldot' | 'gdot' | 'unknown';
-  source: 'google_geocoding' | 'cache' | 'coordinate_fallback';
+  source: 'city_centerline' | 'coordinate_fallback';
   inAtlantaMetro: boolean;
 }
 
 interface GeminiAnalysisState {
+  verificationId?: string;
+  mediaId?: string;
+  classificationDecision?: 'verified' | 'not_pothole' | 'needs_review' | null;
   available: boolean;
   status: 'completed' | 'unavailable' | 'skipped';
   model?: string;
@@ -70,7 +72,7 @@ interface GeminiAnalysisState {
   severityLabel: SeverityLabel;
   confidence: number;
   summary: string;
-  duplicateAssessment?: 'same_pothole' | 'uncertain' | 'likely_different';
+  duplicateLikelihood?: 'likely_same' | 'uncertain' | 'likely_different' | 'not_compared';
   duplicateReason?: string;
   error?: string;
 }
@@ -103,7 +105,14 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
   const [manualLocationOpen, setManualLocationOpen] = useState(false);
   const [classificationAppealed, setClassificationAppealed] = useState(false);
+  const photoSeqRef=useRef(0),analysisSeqRef=useRef(0),gpsSeqRef=useRef(0);
+  const previewRef=useRef<string|null>(null);
+  const analysisAbortRef=useRef<AbortController|null>(null);
   const [compressedPhoto, setCompressedPhoto] = useState<CompressedImageResult | null>(null);
+  const [privacyChecked,setPrivacyChecked]=useState(false);
+  const [cropping,setCropping]=useState(false);
+  const [streetSource,setStreetSource]=useState<'city_centerline'|'user_observed'>('user_observed');
+  const [confirmedLocation,setConfirmedLocation]=useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [mediaId, setMediaId] = useState<string | null>(null);
   const [submissionId, setSubmissionId] = useState<string>(() => createDraftSubmissionId());
@@ -135,7 +144,6 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const [stateCode, setStateCode] = useState('GA');
   const [postalCode, setPostalCode] = useState('');
   const [placeId, setPlaceId] = useState('');
-  const [jurisdiction, setJurisdiction] = useState<'atldot' | 'gdot' | 'unknown'>('unknown');
   const [notes, setNotes] = useState('');
 
   // Step 3: 25m Duplicate candidates + optional Gemini check
@@ -152,7 +160,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   const [aiResult, setAiResult] = useState<GeminiAnalysisState>({
     available: true,
     status: 'skipped',
-    isRoadDefect: true,
+    isRoadDefect: false,
     severityLabel: 'unclassified',
     confidence: 0,
     summary: '',
@@ -160,6 +168,17 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   // Step 4: Submit state
   const [submitting, setSubmitting] = useState(false);
+  const analysisStarted = useRef<string | null>(null);
+  const submissionLock = useRef(false);
+  const submittedPayload = useRef<Record<string, unknown> | null>(null);
+  const [lookupKey, setLookupKey] = useState('');
+  const [lookupError, setLookupError] = useState(false);
+  const [lookupRetry, setLookupRetry] = useState(0);
+  const coordinateKey = coords ? `${coords.lat},${coords.lng}` : '';
+  const withinAtlanta = Boolean(coords && coords.lat >= 33.35 && coords.lat <= 34.2 && coords.lng >= -84.85 && coords.lng <= -84.0);
+  const confirmationKey=JSON.stringify([photoSeqRef.current,coordinateKey,streetName.trim(),streetSource]);
+  const lookupReady = Boolean(coordinateKey && lookupKey === coordinateKey && !gpsLoading && !geocoding && !searchingCandidates && !lookupError && streetName.trim() && withinAtlanta);
+  const locationReady=lookupReady&&confirmedLocation===confirmationKey;
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedResult, setSubmittedResult] = useState<{
     potholeId: string;
@@ -170,28 +189,6 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   const geocodeSeqRef = useRef(0);
   const candidateSeqRef = useRef(0);
-  const pendingConsumedRef = useRef(false);
-
-  // Ingest a pre-auth landing capture once, as soon as the signed-in view mounts.
-  useEffect(() => {
-    if (pendingConsumedRef.current || !user || preselectedPothole) return;
-    const draft = consumePendingCapture();
-    if (!draft) return;
-    pendingConsumedRef.current = true;
-    void processSelectedFile(
-      draft.file,
-      'file',
-      draft.coords
-        ? {
-            coords: draft.coords,
-            coordinateSource: draft.coordinateSource,
-            locationUserCorrected: draft.locationUserCorrected,
-          }
-        : null
-    );
-    // Runs once on mount for the landing handoff; processSelectedFile is stable enough here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
 
   useEffect(() => {
     loadMapsClientConfig().then(setMapsConfig);
@@ -199,10 +196,11 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      uploadAbortRef.current?.abort();
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+      uploadAbortRef.current?.abort(); analysisAbortRef.current?.abort();
+      photoSeqRef.current++;analysisSeqRef.current++;
     };
-  }, [previewUrl]);
+  }, []);
 
   // Sync if preselectedPothole prop changes from MapView "Add Evidence Photo"
   useEffect(() => {
@@ -247,7 +245,6 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
         setGeocodeSource(data.source);
         setInAtlantaMetro(Boolean(data.inAtlantaMetro));
-        setJurisdiction(data.jurisdiction || 'unknown');
         setNeighborhood(data.neighborhood || '');
         setCity(data.city || 'Atlanta');
         setStateCode(data.state || 'GA');
@@ -256,8 +253,10 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
         if (forceOverwriteText || !locationUserCorrected) {
           setFormattedAddress(data.formattedAddress || '');
-          setStreetName(data.streetName || '');
+          setStreetName(current=>data.streetName||current);
+          if(data.streetName)setStreetSource(data.source==='city_centerline'?'city_centerline':'user_observed');
         }
+        return data.streetName || '';
       } catch {
         // Non-fatal fallback: coordinates remain valid even if reverse geocode fails
       } finally {
@@ -291,7 +290,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         const data = (await res.json()) as { candidates?: DuplicateCandidateSummary[] };
         if (seq !== candidateSeqRef.current) return;
 
-        const nextCandidates = Array.isArray(data.candidates) ? data.candidates : [];
+        if (!res.ok || !Array.isArray(data.candidates)) throw new Error('Nearby photo lookup failed.');
+        const nextCandidates = data.candidates;
         setCandidates(nextCandidates);
 
         if (preselectedPothole) {
@@ -299,9 +299,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           setSelectedCandidateId(preselectedPothole.potholeId);
         } else if (nextCandidates.length > 0) {
           const top = nextCandidates[0];
-          setSelectedCandidateId((prev) =>
-            nextCandidates.some((c) => c.potholeId === prev) ? prev : top.potholeId
-          );
+          setSelectedCandidateId(top.potholeId);
           if (top.recommendation === 'likely_same') {
             setActionType('add_evidence');
           } else if (top.recommendation === 'uncertain') {
@@ -313,6 +311,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           setSelectedCandidateId('');
           setActionType('new_pothole');
         }
+        return true;
       } catch {
         if (seq === candidateSeqRef.current) {
           setCandidates([]);
@@ -326,20 +325,25 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     [user, preselectedPothole]
   );
 
-  // Debounce reverse geocode & 25m search when coordinates change
-  useEffect(() => {
-    if (!user || !coords) return;
-    const timer = window.setTimeout(() => {
-      void runReverseGeocode(coords, false);
-      void runCandidateSearch(coords, streetName);
-    }, 350);
-    return () => window.clearTimeout(timer);
-    // Intentionally triggered on coordinate change; streetName is read as latest snapshot
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coords, user]);
+  // Resolve an independent street suggestion only when the pin changes.
+  useEffect(()=>{
+    setConfirmedLocation('');setLookupKey('');setLookupError(false);geocodeSeqRef.current++;candidateSeqRef.current++;
+    setGeocoding(false);setSearchingCandidates(false);
+    if(!user||!coords)return;
+    const timer=window.setTimeout(()=>void runReverseGeocode(coords,true),350);
+    return()=>{window.clearTimeout(timer);geocodeSeqRef.current++;};
+  },[coordinateKey,user,lookupRetry]);
+  // Recheck nearby potholes after street edits; stale results cannot enable publishing.
+  useEffect(()=>{
+    setConfirmedLocation('');setLookupKey('');setLookupError(false);candidateSeqRef.current++;setSearchingCandidates(false);
+    if(!user||!coords||!streetName.trim()||geocoding)return;
+    let canceled=false;
+    const timer=window.setTimeout(async()=>{const ok=await runCandidateSearch(coords,streetName.trim());if(!canceled){setLookupKey(ok?coordinateKey:'');setLookupError(!ok);}},350);
+    return()=>{canceled=true;window.clearTimeout(timer);candidateSeqRef.current++;};
+  },[coordinateKey,streetName,geocoding,lookupRetry,user,preselectedPothole]);
 
-  const startUpload = async (compressed: CompressedImageResult) => {
-    if (!user) return;
+  const startUpload = async (compressed: CompressedImageResult, photoSeq=photoSeqRef.current) => {
+    if (!user || !privacyChecked) {setUploading(false);return;}
     uploadAbortRef.current?.abort();
     const controller = new AbortController();
     uploadAbortRef.current = controller;
@@ -355,35 +359,36 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         uid: user.uid,
         fileId: nextMediaId,
         compressed,
+        privacyConfirmed:privacyChecked,
         onProgress: setUploadProgress,
         signal: controller.signal,
       });
+      if(controller.signal.aborted||photoSeq!==photoSeqRef.current)return;
       setMediaId(nextMediaId);
       setSubmissionId(createDraftSubmissionId());
       setAiResult({
         available: true,
         status: 'skipped',
-        isRoadDefect: true,
+        isRoadDefect: false,
         severityLabel: 'unclassified',
         confidence: 0,
         summary: '',
       });
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Photo upload failed.');
+      if(photoSeq===photoSeqRef.current&&!controller.signal.aborted) setUploadError(err instanceof Error ? err.message : 'Photo upload failed.');
     } finally {
-      setUploading(false);
+      if(photoSeq===photoSeqRef.current&&uploadAbortRef.current===controller)setUploading(false);
     }
   };
 
-  const processSelectedFile = async (
-    file: File,
-    _source: 'camera' | 'file',
-    seededLocation?: {
-      coords: { lat: number; lng: number };
-      coordinateSource: CoordinateSource;
-      locationUserCorrected: boolean;
-    } | null
-  ) => {
+  const processSelectedFile = async (file: File, source: 'camera' | 'file') => {
+    if (submissionLock.current || submittedPayload.current) return;
+    const photoSeq=++photoSeqRef.current;
+    gpsSeqRef.current++;setPrivacyChecked(false);setConfirmedLocation('');setManualLocationOpen(true);setLookupKey('');setCoords(null);setStreetName('');setFormattedAddress('');setStreetSource('user_observed');
+    analysisStarted.current=null; setSubmitError(null);setCompressedPhoto(null);setPreviewUrl(null);setExifCoordsFound(null);if(previewRef.current){URL.revokeObjectURL(previewRef.current);previewRef.current=null;}
+    analysisSeqRef.current++;analysisAbortRef.current?.abort();uploadAbortRef.current?.abort();
+    setGpsLoading(false);setMediaId(null);setAnalyzingAi(false);setUploading(true);setClassificationAppealed(false);
+    setAiResult({available:false,status:'skipped',isRoadDefect:false,severityLabel:'unclassified',confidence:0,summary:''});
     setUploadError(null);
     setSubmittedResult(null);
 
@@ -393,34 +398,27 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         extractExifGpsFromFile(file),
       ]);
 
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      if(photoSeq!==photoSeqRef.current)return;
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
       const nextPreview = URL.createObjectURL(compressed.blob);
+      previewRef.current=nextPreview;
       setPreviewUrl(nextPreview);
       setCompressedPhoto(compressed);
       setExifCoordsFound(exifGps);
       setClassificationAppealed(false);
 
-      if (seededLocation) {
-        // Location the visitor already confirmed on the landing page — honor it
-        // as-is rather than re-deriving from EXIF or device GPS.
-        setCoords(seededLocation.coords);
-        setCoordinateSource(seededLocation.coordinateSource);
-        setAccuracyMeters(undefined);
-        setLocationUserCorrected(seededLocation.locationUserCorrected);
-        setGpsStatusMsg('Using the location you set before signing in. Drag the pin to refine.');
-      } else if (exifGps && !preselectedPothole && !coords) {
+      if (exifGps && !preselectedPothole) {
         setCoords(exifGps);
         setCoordinateSource('exif_extracted');
         setAccuracyMeters(undefined);
         setLocationUserCorrected(false);
         setGpsStatusMsg('Loaded genuine GPS coordinates from photograph EXIF metadata.');
-      } else if (!coords && !exifGps) {
-        handleUseCurrentGps();
-      }
-
-      await startUpload(compressed);
+      } else if(preselectedPothole){setCoords({lat:preselectedPothole.lat,lng:preselectedPothole.lng});setCoordinateSource('manual_pin');setAccuracyMeters(undefined);setStreetName(preselectedPothole.streetName);setLocationUserCorrected(false);}
+      else if(source==='camera'){handleUseCurrentGps();}
+      else {setGpsStatusMsg('This photo has no GPS information. Place the pin where the pothole was photographed.');setAccuracyMeters(undefined);setCoordinateSource('manual_pin');}
+      setUploading(false);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Unable to process image.');
+      if(photoSeq===photoSeqRef.current){setUploadError(err instanceof Error ? err.message : 'Unable to process image.');setUploading(false);}
     }
   };
 
@@ -438,21 +436,25 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   };
 
   function handleUseCurrentGps() {
+    if(submittedPayload.current || submissionLock.current)return;
     if (!('geolocation' in navigator)) {
       setGpsStatusMsg('Browser geolocation is unavailable here. Tap the map to place a manual pin.');
       return;
     }
 
+    const gpsPhotoSeq = photoSeqRef.current, gpsSeq = ++gpsSeqRef.current;
     setGpsLoading(true);
     setGpsStatusMsg('Requesting one-time browser GPS fix...');
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        if (gpsPhotoSeq !== photoSeqRef.current || gpsSeq !== gpsSeqRef.current || submissionLock.current || submittedPayload.current) return;
         const nextCoords = {
           lat: Number(position.coords.latitude.toFixed(6)),
           lng: Number(position.coords.longitude.toFixed(6)),
         };
-        setCoords(nextCoords);
+        setLookupKey(''); setLookupRetry(n=>n+1);
+        setConfirmedLocation('');setStreetName('');setCoords(nextCoords);
         setCoordinateSource('gps_verified');
         setAccuracyMeters(
           Number.isFinite(position.coords.accuracy) ? Math.round(position.coords.accuracy) : undefined
@@ -464,6 +466,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         );
       },
       (geoErr) => {
+        if (gpsPhotoSeq !== photoSeqRef.current || gpsSeq !== gpsSeqRef.current) return;
         setGpsLoading(false);
         if (geoErr.code === geoErr.PERMISSION_DENIED) {
           setGpsStatusMsg(
@@ -484,67 +487,44 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
   }
 
   const handleManualPinChange = (nextCoords: { lat: number; lng: number }) => {
-    setCoords(nextCoords);
+    if(submittedPayload.current || submissionLock.current)return;
+    gpsSeqRef.current++; setGpsLoading(false);
+    setLookupKey('');
+    setConfirmedLocation('');setCoords(nextCoords);
+    setStreetName(''); setFormattedAddress('');
     setCoordinateSource('manual_pin');
     setAccuracyMeters(undefined);
-    setLocationUserCorrected(true);
-    setGpsStatusMsg('Manual pin updated. Reverse geocoding and 25m check refreshed.');
+    setLocationUserCorrected(false);
+    setGpsStatusMsg('Pin updated. Check the street name and confirm the location.');
+    setLookupRetry(n=>n+1);
   };
 
   const handleOptionalAiCheck = async () => {
-    if (!user || !mediaId) return;
-    setAnalyzingAi(true);
+    if (!user?.emailVerified || !mediaId || submissionLock.current || submittedPayload.current) return;
+    const id=mediaId, seq=++analysisSeqRef.current;
+    analysisAbortRef.current?.abort(); const controller=new AbortController(); analysisAbortRef.current=controller;
+    setAnalyzingAi(true);setClassificationAppealed(false);
+    setAiResult({available:false,status:'skipped',isRoadDefect:false,severityLabel:'unclassified',confidence:0,summary:''});
     try {
-      const token = await user.getIdToken();
-      const chosenCandidate = candidates.find((c) => c.potholeId === selectedCandidateId);
-      const candidateMediaId =
-        preselectedPothole?.primaryMediaId || chosenCandidate?.primaryMediaId || undefined;
-
-      const res = await fetch('/api/potholes/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          mediaId,
-          candidateMediaId,
-          notes,
-        }),
-      });
-      const data = (await res.json()) as GeminiAnalysisState;
-      setAiResult({
-        available: Boolean(data.available),
-        status: data.status ?? (data.available ? 'completed' : 'unavailable'),
-        model: data.model,
-        isRoadDefect: typeof data.isRoadDefect === 'boolean' ? data.isRoadDefect : true,
-        severityLabel: data.severityLabel ?? 'unclassified',
-        confidence: typeof data.confidence === 'number' ? data.confidence : 0,
-        summary: data.summary ?? 'Optional photo analysis unavailable.',
-        duplicateAssessment: data.duplicateAssessment,
-        duplicateReason: data.duplicateReason,
-        error: data.error,
-      });
-    } catch {
-      setAiResult({
-        available: false,
-        status: 'unavailable',
-        isRoadDefect: true,
-        severityLabel: 'unclassified',
-        confidence: 0,
-        summary: 'Optional image analysis unavailable; capture continues normally.',
-      });
-    } finally {
-      setAnalyzingAi(false);
-    }
+      const token=await user.getIdToken();
+      const res=await fetch('/api/potholes/analyze',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({mediaId:id}),signal:controller.signal});
+      const data=await res.json() as GeminiAnalysisState;
+      if(seq!==analysisSeqRef.current||controller.signal.aborted)return;
+      if(!res.ok || data.mediaId!==id || !data.verificationId) throw new Error(data.error||'Unable to verify this photo.');
+      setAiResult({...data,isRoadDefect:data.classificationDecision==='verified'});
+    }catch(err){
+      if(seq!==analysisSeqRef.current||controller.signal.aborted)return;
+      setAiResult({available:false,status:'unavailable',isRoadDefect:false,severityLabel:'unclassified',confidence:0,summary:err instanceof Error?err.message:'Unable to verify this photo.'});
+    }finally{if(seq===analysisSeqRef.current)setAnalyzingAi(false);}
   };
 
   useEffect(() => {
-    if (!mediaId || aiResult.status !== 'skipped' || analyzingAi) return;
+    if (!user?.emailVerified || !mediaId || uploading || analysisStarted.current === mediaId) return;
+    analysisStarted.current = mediaId;
     void handleOptionalAiCheck();
-    // The uploaded media ID is the trigger; the classifier runs once per new photo.
+    // One automatic check per uploaded media ID; retries are explicit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediaId]);
+  }, [user, mediaId, uploading]);
 
   const topCandidateConfidence = useMemo(() => {
     const match = candidates.find((c) => c.potholeId === selectedCandidateId) ?? candidates[0];
@@ -555,17 +535,19 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     user &&
       user.emailVerified &&
       mediaId &&
-      !uploading &&
+      !uploading && !cameraModalOpen &&
       coords &&
-      streetName.trim().length > 0 &&
-      aiResult.status === 'completed' &&
-      (aiResult.isRoadDefect || classificationAppealed) &&
+      locationReady &&
+      !analyzingAi && aiResult.mediaId===mediaId && aiResult.verificationId &&
+      (aiResult.classificationDecision==='verified' || classificationAppealed) &&
       (actionType !== 'add_evidence' || selectedCandidateId)
   );
   const submissionActionType = classificationAppealed ? 'provisional_review' : actionType;
 
   const handleSubmitPothole = async () => {
-    if (!user || !mediaId || !coords || !canSubmit) return;
+    if (!user || !mediaId || !coords || submissionLock.current || (!canSubmit && !submittedPayload.current)) return;
+    submissionLock.current=true;
+    const seq=photoSeqRef.current;
     setSubmitting(true);
     setSubmitError(null);
 
@@ -575,21 +557,17 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         ? [preselectedPothole.potholeId]
         : candidates.map((c) => c.potholeId);
 
-      const res = await fetch('/api/potholes/submit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      const payload = submittedPayload.current ?? {
           submissionId,
           mediaId,
           lat: coords.lat,
           lng: coords.lng,
           coordinateSource,
+          locationConfirmed:true,
+          streetSource,
           accuracyMeters,
           actionType: submissionActionType,
-          targetPotholeId: submissionActionType === 'add_evidence' ? selectedCandidateId : undefined,
+          targetPotholeId: actionType === 'add_evidence' ? selectedCandidateId : undefined,
           candidatePotholeIds: candidateIds,
           formattedAddress:
             formattedAddress.trim() || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}, Atlanta, GA`,
@@ -602,11 +580,11 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           locationUserCorrected,
           notes: notes.trim() || undefined,
           duplicateConfidence: topCandidateConfidence,
-          aiClassificationStatus: aiResult.status,
-          aiIsRoadDefect: aiResult.isRoadDefect,
-          aiSeverityLabel: aiResult.severityLabel,
-          aiSummary: aiResult.summary || undefined,
-        }),
+          verificationId: aiResult.verificationId,
+        };
+      submittedPayload.current=payload;
+      const res = await fetch('/api/potholes/submit', {
+        method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}, body:JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -614,6 +592,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         throw new Error(data.error || 'Submission failed.');
       }
 
+      if (!data.ok || typeof data.potholeId !== 'string' || data.submissionId !== submissionId || !['distinct','evidence_added','pending_review'].includes(data.duplicateStatus)) throw new Error('Unexpected submission response. Retry saving to confirm.');
+      if(seq!==photoSeqRef.current)return;
       setSubmittedResult({
         potholeId: data.potholeId,
         submissionId: data.submissionId,
@@ -621,14 +601,26 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         coords,
       });
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Unable to save submission.');
+      if(seq===photoSeqRef.current)setSubmitError(err instanceof Error ? err.message : 'Unable to save submission.');
     } finally {
-      setSubmitting(false);
+      submissionLock.current=false;
+      if(seq===photoSeqRef.current)setSubmitting(false);
     }
   };
 
+  useEffect(() => {
+    if (canSubmit && !submitting && !submittedResult && !submitError && !submittedPayload.current) void handleSubmitPothole();
+    // A failed save is retried explicitly with the same submission ID and payload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSubmit, submitting, submittedResult, submitError]);
+
   const handleResetCapture = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    if(submissionLock.current)return;
+    gpsSeqRef.current++;setGpsLoading(false);setLookupKey('');setLookupError(false);
+    submittedPayload.current=null; analysisStarted.current=null;
+    photoSeqRef.current++;analysisSeqRef.current++;uploadAbortRef.current?.abort();analysisAbortRef.current?.abort();
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    previewRef.current=null;setUploading(false);setAnalyzingAi(false);
     setPreviewUrl(null);
     setCompressedPhoto(null);
     setMediaId(null);
@@ -643,7 +635,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     setAiResult({
       available: true,
       status: 'skipped',
-      isRoadDefect: true,
+      isRoadDefect: false,
       severityLabel: 'unclassified',
       confidence: 0,
       summary: '',
@@ -651,7 +643,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     if (preselectedPothole) {
       onClearPreselected();
     }
-    setCoords(null);
+    setCoords(null);setConfirmedLocation('');setPrivacyChecked(false);
     setFormattedAddress('');
     setStreetName('');
     setCandidates([]);
@@ -678,24 +670,23 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
 
   if (submittedResult) {
     return (
-      <div className="city-page city-capture capture-success max-w-2xl mx-auto space-y-5">
-        <div className="bg-white rounded-2xl border border-[#E8DFC5] p-6 sm:p-8 space-y-5">
+      <div className="city-page city-capture capture-success max-w-2xl mx-auto bg-white rounded-2xl border border-[#E8DFC5] p-6 sm:p-8 space-y-5">
         <div className="flex items-start gap-3">
           <CheckCircle2 className="w-8 h-8 text-[#4CB729] shrink-0" />
           <div>
             <h1 className="font-display text-2xl font-bold text-[#2D2B35]">
               {submittedResult.duplicateStatus === 'distinct'
-                ? 'Distinct Pothole Recorded'
+                ? 'Photo approved — pothole captured!'
                 : submittedResult.duplicateStatus === 'evidence_added'
-                  ? 'Supporting Evidence Linked'
-                  : 'Provisional Review Saved'}
+                  ? 'Photo approved — evidence captured!'
+                  : 'Photo sent for manual review'}
             </h1>
             <p className="text-sm text-[#4B4646] mt-1">
               {submittedResult.duplicateStatus === 'distinct'
-                ? 'Your verified submission is now live on the Atlanta community map and credited to your profile.'
+                ? 'Your photo has been added to your gallery and the community map. It counts as a pothole captured and a new distinct pothole.'
                 : submittedResult.duplicateStatus === 'evidence_added'
-                  ? 'Your photo was added as supporting evidence without inflating distinct pothole counts.'
-                  : 'Your submission is preserved for review on Home and excluded from distinct counts until resolved.'}
+                  ? 'Your photo has been added to your gallery and counts as a captured photo. It supports an existing pothole without increasing your distinct pothole count.'
+                  : 'Your photo is awaiting review on Home. It will not appear in your approved gallery or count as a pothole captured until approved.'}
             </p>
           </div>
         </div>
@@ -728,11 +719,11 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => onSubmittedToMap(submittedResult.potholeId, submittedResult.coords)}
+            onClick={() => submittedResult.duplicateStatus==='pending_review'?handleResetCapture():onSubmittedToMap(submittedResult.potholeId, submittedResult.coords)}
             className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-sm font-semibold transition flex items-center gap-2"
           >
             <MapPin className="w-4 h-4" />
-            <span>View on Atlanta Map</span>
+            <span>{submittedResult.duplicateStatus==='pending_review'?'Capture another photo':'View on Atlanta Map'}</span>
           </button>
           <button
             type="button"
@@ -743,29 +734,6 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
             <span>Capture Another</span>
           </button>
         </div>
-        </div>
-
-        {submittedResult.duplicateStatus === 'distinct' && mediaId && streetName.trim() && (
-          <OfficialReportPanel
-            input={{
-              potholeId: submittedResult.potholeId,
-              streetName: streetName.trim(),
-              formattedAddress: formattedAddress.trim() || streetName.trim(),
-              lat: submittedResult.coords.lat,
-              lng: submittedResult.coords.lng,
-              jurisdiction,
-              agencyName:
-                jurisdiction === 'gdot'
-                  ? 'Georgia Department of Transportation (GDOT)'
-                  : 'City of Atlanta — ATL311',
-              severityLabel: aiResult.severityLabel,
-              coordinateSource,
-              notes: notes.trim() || undefined,
-              reportedAtISO: new Date().toISOString(),
-              photoUrl: `/api/media/${mediaId}`,
-            }}
-          />
-        )}
       </div>
     );
   }
@@ -774,14 +742,14 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
     <div className={`city-page city-capture max-w-6xl mx-auto space-y-6 ${manualLocationOpen ? 'manual-location-open' : ''}`}>
       <div className="page-banner page-banner-capture">
         <div>
-          <span className="page-banner-index">FIELD TOOL / 03</span>
+          <span className="page-banner-index">FIELD TOOL</span>
           <h1>SNAP THE<br /><em>EVIDENCE.</em></h1>
-          <p>Take the picture. PatchUp handles location, verification, nearby-report checks, and publishing.</p>
+          <p>Take the picture, check for private details and confirm the pin. PatchUp handles verification and publishing.</p>
         </div>
         <Camera className="page-banner-icon" aria-hidden="true" />
       </div>
       {/* Header */}
-      <div className="capture-toolbelt bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div inert={submitting || Boolean(submittedPayload.current)} className="capture-toolbelt bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold text-[#2D2B35]">
             {preselectedPothole ? 'Add Evidence Photo' : 'Capture & Verify Pothole'}
@@ -826,7 +794,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       {preselectedPothole && (
         <div className="rounded-2xl bg-white border border-[#4CB729]/40 p-4 flex items-center gap-3">
           {preselectedPothole.primaryPhotoUrl && (
-            <img
+            <ProtectedImage
               src={preselectedPothole.primaryPhotoUrl}
               alt={preselectedPothole.streetName}
               referrerPolicy="no-referrer"
@@ -843,7 +811,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       )}
 
       {/* Step 1: Photo Capture & Compression Upload */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+      <section inert={submitting || Boolean(submittedPayload.current)} className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <h2 className="font-display text-lg font-bold text-[#2D2B35]">
             Take a pothole photo
@@ -866,7 +834,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           type="file"
           accept="image/jpeg,image/png,image/webp"
           capture="environment"
-          onChange={(e) => void handleFileChange(e, 'camera')}
+          onChange={(e) => void handleFileChange(e, 'file')}
           className="hidden"
         />
 
@@ -962,7 +930,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                     >
                       Replace Photo
                     </button>
-                    {uploadError && compressedPhoto && (
+                    {uploadError && compressedPhoto && privacyChecked && (
                       <button
                         type="button"
                         onClick={() => void startUpload(compressedPhoto)}
@@ -978,7 +946,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setCoords(exifCoordsFound);
+                      gpsSeqRef.current++; setGpsLoading(false); setLookupKey(''); setLookupRetry(n=>n+1);
+                      setConfirmedLocation('');setStreetName('');setCoords(exifCoordsFound);
                       setCoordinateSource('exif_extracted');
                       setAccuracyMeters(undefined);
                       setLocationUserCorrected(false);
@@ -993,17 +962,24 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
             </div>
           </div>
         )}
+        {compressedPhoto && !mediaId && !uploading && <div className="rounded-xl border p-4 space-y-3">
+          <h3 className="font-bold">Review your photo before uploading</h3>
+          <p className="text-sm">Check the preview for faces, license plates, house numbers or other personal details. Crop closer to the pothole or replace the photo if needed.</p>
+          <button type="button" disabled={cropping} className="border rounded-lg px-3 py-2" onClick={async()=>{const seq=photoSeqRef.current;setCropping(true);setPrivacyChecked(false);try{const cropped=await cropPhoto(compressedPhoto,.1);if(seq!==photoSeqRef.current)return;if(previewRef.current)URL.revokeObjectURL(previewRef.current);const url=URL.createObjectURL(cropped.blob);previewRef.current=url;setPreviewUrl(url);setCompressedPhoto(cropped);}catch{setUploadError('Could not crop this photo. Retake or replace it.');}finally{setCropping(false);}}}>Crop 10% from each edge</button>
+          <label className="flex gap-2 text-sm"><input type="checkbox" checked={privacyChecked} onChange={e=>setPrivacyChecked(e.target.checked)}/> I checked this photograph and removed visible personal details.</label>
+          <button type="button" disabled={!privacyChecked||cropping} onClick={()=>void startUpload(compressedPhoto)} className="bg-[#2D2B35] text-white rounded-lg px-4 py-3 disabled:opacity-50">Upload and check photo</button>
+        </div>}
       </section>
 
       {/* Step 2: Explicit Location & Pin Verification */}
-      <section className="capture-location-details bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+      <section inert={submitting || Boolean(submittedPayload.current)} className="capture-location-details bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-              Report with a map pin instead
+              Confirm the pothole location
             </h2>
             <p className="text-xs text-[#6E6978] mt-0.5">
-              Use this fallback when you need to place or correct the location manually. PatchUp
+              Check the suggested pin or place one yourself. PatchUp
               never tracks your location in the background.
             </p>
           </div>
@@ -1019,17 +995,17 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
               ) : (
                 <Crosshair className="w-4 h-4" />
               )}
-              <span>Use Current GPS</span>
+              <span>Use Current GPS (only if at the pothole)</span>
             </button>
             {coords && (
               <button
                 type="button"
-                onClick={() => void runReverseGeocode(coords, true)}
+                onClick={() => { setLookupKey(''); setLocationUserCorrected(false); setLookupRetry(n=>n+1); }}
                 disabled={geocoding}
                 className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] inline-flex items-center gap-1.5"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${geocoding ? 'animate-spin' : ''}`} />
-                <span>Refresh Address</span>
+                <span>Refresh street suggestion</span>
               </button>
             )}
           </div>
@@ -1060,35 +1036,22 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label className="block space-y-1.5">
             <span className="text-xs font-semibold text-[#4B4646]">
-              Street Name {geocoding ? '(Looking up...)' : ''}
+              Street name from a street sign or your own knowledge {geocoding ? '(Looking up...)' : ''}
             </span>
             <input
               type="text"
               maxLength={128}
               value={streetName}
+              disabled={geocoding}
               placeholder="e.g., Peachtree St NE"
               onChange={(e) => {
-                setStreetName(e.target.value);
+                setStreetName(e.target.value);setLookupKey('');setStreetSource('user_observed');setConfirmedLocation('');
                 setLocationUserCorrected(true);
               }}
               className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-sm text-[#2D2B35] focus:outline-2 focus:outline-[#4CB729]"
             />
           </label>
 
-          <label className="block space-y-1.5">
-            <span className="text-xs font-semibold text-[#4B4646]">Formatted Street Address</span>
-            <input
-              type="text"
-              maxLength={256}
-              value={formattedAddress}
-              placeholder="e.g., 600 Peachtree St NE, Atlanta, GA 30308"
-              onChange={(e) => {
-                setFormattedAddress(e.target.value);
-                setLocationUserCorrected(true);
-              }}
-              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-sm text-[#2D2B35] focus:outline-2 focus:outline-[#4CB729]"
-            />
-          </label>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-[#6E6978]">
@@ -1105,20 +1068,14 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5]/70 px-3 py-2">
             Geocode:{' '}
             <span className="font-semibold text-[#2D2B35]">
-              {geocodeSource === 'google_geocoding'
-                ? 'Google Geocoding API'
-                : geocodeSource === 'cache'
-                  ? 'Cached Address'
-                  : geocodeSource === 'coordinate_fallback'
-                    ? 'Manual Entry'
-                    : 'Pending pin'}
+              {geocodeSource === 'city_centerline' ? 'City street data' : 'Street name entered by reporter'}
             </span>
           </div>
         </div>
 
         <label className="block space-y-1.5">
           <span className="text-xs font-semibold text-[#4B4646]">
-            Hazard Notes (Optional, max 400 chars)
+            Private hazard notes (optional — no personal information)
           </span>
           <textarea
             rows={2}
@@ -1131,22 +1088,28 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         </label>
       </section>
 
+      {compressedPhoto && !submittedPayload.current && <div className="rounded-xl border p-4 space-y-2">
+        <p className="text-sm">{locationReady?'Location confirmed. Approved photos will publish automatically.':'Confirm the pin is at the pothole, not your current location unless you are there.'}</p>
+        <button type="button" className="border rounded-lg px-4 py-2" onClick={()=>setManualLocationOpen(true)}>Show or adjust map pin</button>
+        <button type="button" disabled={!lookupReady} className="bg-[#2D2B35] text-white rounded-lg px-4 py-2 disabled:opacity-50" onClick={()=>setConfirmedLocation(confirmationKey)}>Confirm pothole location</button>
+        {lookupError&&<button type="button" className="underline" onClick={()=>setLookupRetry(n=>n+1)}>Retry nearby photo check</button>}
+      </div>}
       {/* Step 3: 25m Duplicate Review & Optional AI Check */}
-      <section className="capture-internal-checks bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+      <section inert={submitting || Boolean(submittedPayload.current)} className="capture-internal-checks bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="font-display text-lg font-bold text-[#2D2B35]">
               3. 25m Duplicate Check & Optional Photo Analysis
             </h2>
             <p className="text-xs text-[#6E6978] mt-0.5">
-              Candidates within 25m are reviewed by confidence so separate nearby craters are never
+              Candidates within 25m are reviewed by confidence so separate nearby potholes are never
               blindly merged.
             </p>
           </div>
           {coords && (
             <button
               type="button"
-              onClick={() => void runCandidateSearch(coords, streetName)}
+              onClick={() => { setLookupKey(''); setLookupRetry(n=>n+1); }}
               disabled={searchingCandidates}
               className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] inline-flex items-center gap-1.5 shrink-0"
             >
@@ -1183,7 +1146,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <img
+                    <ProtectedImage
                       src={cand.primaryPhotoUrl}
                       alt={cand.streetName}
                       referrerPolicy="no-referrer"
@@ -1227,7 +1190,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
             >
               <div className="text-xs font-bold text-[#2D2B35]">Distinct Pothole</div>
               <div className="text-[11px] text-[#6E6978] mt-1">
-                Separate physical crater from nearby records.
+                Separate physical pothole from nearby records.
               </div>
             </button>
           )}
@@ -1266,159 +1229,40 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           )}
         </div>
 
-        {/* Optional Gemini Photo Analysis */}
-        <div className="pt-3 border-t border-[#E8DFC5] space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-[#4B4646]">
-              Optional AI Classification & Visual Comparison (never blocks submission; never infers GPS)
-            </div>
-            <button
-              type="button"
-              disabled={!mediaId || analyzingAi}
-              onClick={() => void handleOptionalAiCheck()}
-              className="min-h-[44px] px-4 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] inline-flex items-center gap-2 disabled:opacity-50"
-            >
-              {analyzingAi ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4 text-[#4CB729]" />
-              )}
-              <span>Run Optional AI Photo Check</span>
-            </button>
-          </div>
 
-          {aiResult.status !== 'skipped' && (
-            <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-3.5 space-y-1 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2 font-semibold text-[#2D2B35]">
-                <span>
-                  {aiResult.available
-                    ? `${aiResult.isRoadDefect ? 'Road Defect Verified' : 'Non-Road Photo Warning'} · Severity: ${aiResult.severityLabel}`
-                    : 'AI Check Unavailable (Non-Blocking)'}
-                </span>
-                {aiResult.model && (
-                  <span className="font-mono text-[11px] text-[#6E6978]">{aiResult.model}</span>
-                )}
-              </div>
-              <p className="text-[#4B4646]">{aiResult.summary}</p>
-              {aiResult.duplicateReason && (
-                <p className="text-[#6E6978]">
-                  Visual comparison ({aiResult.duplicateAssessment}): {aiResult.duplicateReason}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
       </section>
 
       <section className="capture-verification bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4" aria-live="polite">
         <div>
-          <span className="page-banner-index">AUTOMATIC PHOTO CHECK</span>
-          <h2 className="font-display text-lg font-bold text-[#2D2B35]">We verify every photo for you</h2>
-          <p className="text-sm text-[#4B4646] mt-1">
-            You only need to take the picture. PatchUp checks whether it shows a pothole before it
-            can appear on the community map.
-          </p>
+          <span className="page-banner-index">PHOTO VERIFICATION</span>
+          <h2 className="font-display text-lg font-bold text-[#2D2B35]">Automatic photo check</h2>
+          <p className="text-sm text-[#4B4646] mt-1">Gemini examines only the compressed photo, not your notes or location. Keep faces, plates and other personal details out of the frame. Approved photos will be visible to the community.</p>
         </div>
-
         {!mediaId ? (
-          <div className="capture-check-state">Take or choose a photo to begin automatic verification.</div>
+          <div className="capture-check-state">{uploading ? 'Uploading your photo…' : 'Take or choose a photo to begin verification.'}</div>
+        ) : !user.emailVerified ? (
+          <div className="capture-check-state is-warning">Verify your account email before checking your photo.</div>
         ) : analyzingAi || aiResult.status === 'skipped' ? (
-          <div className="capture-check-state is-processing">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>Checking your photo…</span>
-          </div>
-        ) : aiResult.status === 'unavailable' ? (
-          <div className="capture-check-state is-warning">
-            <AlertTriangle className="w-5 h-5" />
-            <div>
-              <strong>We couldn’t verify this photo yet.</strong>
-              <p>Try the check again before submitting.</p>
-            </div>
-            <button type="button" onClick={() => void handleOptionalAiCheck()}>Try verification again</button>
-          </div>
-        ) : aiResult.isRoadDefect ? (
-          <div className="capture-check-state is-approved">
-            <CheckCircle2 className="w-5 h-5" />
-            <div>
-              <strong>Pothole confirmed.</strong>
-              <p>Your photo is ready to submit.</p>
-            </div>
-          </div>
+          <div className="capture-check-state is-processing"><Loader2 className="w-5 h-5 animate-spin" /><span>Checking your photo…</span></div>
+        ) : aiResult.classificationDecision === 'verified' ? (
+          <div className="capture-check-state is-approved"><CheckCircle2 className="w-5 h-5 shrink-0" /><div><strong>Photo approved — pothole detected.</strong><p>{aiResult.summary}</p><p>{submitting ? 'Saving your capture…' : actionType === 'provisional_review' ? 'Nearby match needs review before credit can be awarded.' : 'Your photo will be saved automatically once its location and nearby checks are ready.'}</p></div></div>
         ) : (
-          <div className="capture-check-state is-rejected">
-            <AlertTriangle className="w-5 h-5" />
-            <div>
-              <strong>
-                Hm, we determined that this photo isn't of a pothole. Make sure you're only
-                snapping pictures of potholes!
-              </strong>
-            </div>
-            {!classificationAppealed ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setClassificationAppealed(true);
-                  setActionType('provisional_review');
-                }}
-              >
-                Did we get this wrong?
-              </button>
-            ) : (
-              <span className="capture-review-queued">This photo will be sent for admin review.</span>
-            )}
+          <div className={`capture-check-state ${aiResult.status === 'unavailable' || aiResult.classificationDecision === 'needs_review' ? 'is-warning' : 'is-rejected'}`}><AlertTriangle className="w-5 h-5 shrink-0" /><div><strong>{aiResult.status === 'unavailable' ? 'Photo check unavailable' : aiResult.classificationDecision === 'needs_review' ? 'Photo not approved — review required.' : 'Photo not approved — pothole not detected.'}</strong><p>{aiResult.summary}</p>{classificationAppealed && <p>{submitting ? 'Sending for review…' : 'Manual review requested. Waiting for location and nearby checks.'}</p>}</div></div>
+        )}
+        {mediaId && aiResult.status !== 'skipped' && aiResult.classificationDecision !== 'verified' && !classificationAppealed && !submittedPayload.current && (
+          <div className="flex flex-wrap gap-2">
+            {aiResult.status === 'unavailable' && <button type="button" disabled={analyzingAi} onClick={()=>void handleOptionalAiCheck()} className="min-h-11 px-4 py-2 border rounded-xl">Retry photo check</button>}
+            {aiResult.verificationId && <button type="button" disabled={analyzingAi} onClick={()=>setClassificationAppealed(true)} className="min-h-11 px-4 py-2 border rounded-xl font-semibold">Request Manual Review</button>}
           </div>
         )}
-      </section>
-
-      {/* Step 4: Submit Footer */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-3">
-        {submitError && (
-          <div className="rounded-xl bg-[#DC2626]/10 border border-[#DC2626]/30 px-4 py-3 text-xs text-[#DC2626]">
-            {submitError}
+        {mediaId && (aiResult.classificationDecision === 'verified' || classificationAppealed) && !locationReady && !submittedPayload.current && (
+          <div className="text-sm space-y-2">
+            <p>{!coords ? 'A location is required to save this photo.' : !withinAtlanta ? 'Choose a location within the Atlanta metro area.' : lookupError ? 'Location or nearby checks could not be completed.' : !streetName.trim()?'Enter the street name from a street sign or your own knowledge.':lookupReady?'Confirm the pothole location above.':'Checking location and nearby potholes…'}</p>
+            <button type="button" onClick={()=>setManualLocationOpen(true)} className="min-h-11 px-4 py-2 border rounded-xl">Set or correct location</button>
+            {coords && lookupError && <button type="button" onClick={()=>{setLookupKey('');setLookupRetry(n=>n+1);}} className="min-h-11 px-4 py-2 border rounded-xl">Retry location checks</button>}
           </div>
         )}
-
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="text-xs text-[#6E6978]">
-            {!mediaId
-              ? 'Take or choose a pothole photo to continue.'
-              : analyzingAi || aiResult.status === 'skipped'
-                ? 'We’re checking whether this photo shows a pothole.'
-                : aiResult.status === 'unavailable'
-                  ? 'Photo verification must finish before submission.'
-                  : !aiResult.isRoadDefect && !classificationAppealed
-                    ? 'Use “Did we get this wrong?” to request a manual review.'
-              : !coords
-                ? 'Waiting for the photo location. You can also open the manual map pin above.'
-                : !streetName.trim()
-                  ? 'Looking up the street name from the photo location.'
-                  : classificationAppealed
-                    ? 'Ready to send this photo for admin review.'
-                    : 'Your verified pothole is ready to publish.'}
-          </div>
-
-          <button
-            type="button"
-            disabled={!canSubmit || submitting}
-            onClick={() => void handleSubmitPothole()}
-            className="min-h-[48px] px-6 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-sm font-semibold transition inline-flex items-center justify-center gap-2 disabled:opacity-50 shrink-0"
-          >
-            {submitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4" />
-            )}
-            <span>
-              {submitting
-                  ? 'Submitting…'
-                : submissionActionType === 'add_evidence'
-                  ? 'Submit photo evidence'
-                  : submissionActionType === 'provisional_review'
-                    ? 'Send for review'
-                    : 'Publish pothole'}
-            </span>
-          </button>
-        </div>
+        {submitError && <div role="alert" className="rounded-xl border border-red-300 p-3 text-sm text-red-700"><p>{submitError}</p><button type="button" disabled={submitting} onClick={()=>void handleSubmitPothole()} className="min-h-11 px-4 py-2 border rounded-xl mt-2">Retry saving photo</button><p className="text-xs mt-2">Retry uses the original submission ID to prevent duplicate credit. If you start another capture, check Home for the previous photo first.</p><button type="button" disabled={submitting} onClick={handleResetCapture} className="min-h-11 px-4 py-2 border rounded-xl mt-2">Capture another photo</button></div>}
       </section>
 
       <CameraCaptureModal

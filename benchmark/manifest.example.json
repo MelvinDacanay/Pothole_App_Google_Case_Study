@@ -1,0 +1,5 @@
+[
+  {"id":"dev-001","file":"photos/dev-001.jpg","label":"pothole","group":"road-location-A-session-1","split":"dev","stratum":"daylight_pothole"},
+  {"id":"holdout-001","file":"photos/holdout-001.jpg","label":"not_pothole","group":"road-location-B-session-1","split":"holdout","stratum":"crack_or_patch"},
+  {"id":"holdout-002","file":"photos/holdout-002.jpg","label":"unclear","group":"road-location-C-session-1","split":"holdout","stratum":"obscured_puddle"}
+]

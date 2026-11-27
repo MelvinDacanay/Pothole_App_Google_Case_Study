@@ -10,6 +10,7 @@ import {
 } from '@vis.gl/react-google-maps';
 import { MarkerClusterer, type Marker as ClusterMarker } from '@googlemaps/markerclusterer';
 import { AlertTriangle, Crosshair, MapPin } from 'lucide-react';
+import { createPotholePin } from '../lib/potholePin';
 import {
   ATLANTA_CENTER,
   COORDINATE_SOURCE_LABELS,
@@ -27,40 +28,11 @@ interface AtlantaMapProps {
   focusCoords?: { lat: number; lng: number } | null;
 }
 
-const STATUS_PIN_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  accepted: { bg: '#4CB729', border: '#2D2B35', text: '#FFFFFF' },
-  provisional: { bg: '#D97706', border: '#2D2B35', text: '#FFFFFF' },
-  reported: { bg: '#6E6978', border: '#2D2B35', text: '#FFFFFF' },
-  acknowledged: { bg: '#4B4646', border: '#E8DFC5', text: '#FFFFFF' },
-  repaired: { bg: '#2D2B35', border: '#4CB729', text: '#4CB729' },
-};
-
 function createPinElement(pothole: PotholeRecord, isSelected: boolean): HTMLDivElement {
-  const palette = STATUS_PIN_COLORS[pothole.status] ?? STATUS_PIN_COLORS.accepted;
-  const el = document.createElement('div');
-  el.style.width = isSelected ? '34px' : '28px';
-  el.style.height = isSelected ? '34px' : '28px';
-  el.style.borderRadius = '9999px';
-  el.style.backgroundColor = palette.bg;
-  el.style.border = `${isSelected ? '3px' : '2px'} solid ${palette.border}`;
-  el.style.color = palette.text;
-  el.style.display = 'flex';
-  el.style.alignItems = 'center';
-  el.style.justifyContent = 'center';
-  el.style.fontFamily = '"JetBrains Mono", monospace';
-  el.style.fontSize = '11px';
-  el.style.fontWeight = '700';
-  el.style.boxShadow = isSelected
-    ? '0 0 0 4px rgba(76, 183, 41, 0.35), 0 4px 10px rgba(0,0,0,0.28)'
-    : '0 2px 6px rgba(0,0,0,0.25)';
-  el.style.cursor = 'pointer';
-  el.style.transition = 'transform 150ms ease';
-  el.textContent = pothole.evidenceCount > 1 ? String(pothole.evidenceCount) : 'P';
-  el.setAttribute(
-    'aria-label',
-    `${pothole.streetName} (${POTHOLE_STATUS_LABELS[pothole.status] ?? pothole.status})`
+  return createPotholePin(
+    `${pothole.streetName} (${POTHOLE_STATUS_LABELS[pothole.status] ?? pothole.status}), ${pothole.evidenceCount} evidence`,
+    isSelected
   );
-  return el;
 }
 
 const ClusteredPotholeMarkers: React.FC<{
@@ -119,6 +91,9 @@ const ClusteredPotholeMarkers: React.FC<{
         position: { lat: pothole.lat, lng: pothole.lng },
         title: pothole.formattedAddress || pothole.streetName,
         content: pinContent,
+        // This artwork is a ground-level crater, not a bottom-pointed pin.
+        anchorLeft: '-50%',
+        anchorTop: '-50%',
         zIndex: isSelected ? 100 : 1,
       });
 

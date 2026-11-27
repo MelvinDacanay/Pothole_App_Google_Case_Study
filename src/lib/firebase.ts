@@ -12,7 +12,7 @@ import {
 import { doc, getDocFromServer, getFirestore, type Firestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const LOCAL_DEV_FIRESTORE_ID = 'ai-studio-bca41787-ae3f-4dc1-a851-4fcb17cec913';
+const LOCAL_DEV_FIRESTORE_ID = '(default)';
 
 function resolveClientApiKey(): string {
   const fromEnv = import.meta.env.VITE_FIREBASE_API_KEY;
@@ -58,7 +58,10 @@ if (firebaseClientConfigured) {
   setPersistence(auth, browserLocalPersistence).catch((err) => {
     console.warn('Unable to configure local auth persistence:', err);
   });
-  db = getFirestore(app, resolveFirestoreDatabaseId());
+  const firestoreDbId = resolveFirestoreDatabaseId();
+  db = firestoreDbId && firestoreDbId !== '(default)'
+    ? getFirestore(app, firestoreDbId)
+    : getFirestore(app);
 } else {
   console.warn(`PatchUp: ${missingConfigMessage}`);
 }

@@ -11,7 +11,10 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "lint:rules": "eslint firestore.rules",
-    "test": "node --test --experimental-strip-types tests/production.test.ts"
+    "test": "node --test --experimental-strip-types tests/production.test.ts tests/verification.test.ts tests/admin-draft.test.ts tests/atldot-policy.test.ts tests/admin-hub.test.ts tests/photo-privacy.test.ts tests/admin-authorization.test.ts",
+    "benchmark": "node --experimental-strip-types scripts/benchmark.ts",
+    "test:emulator": "node --test --experimental-strip-types tests/verification.emulator.test.ts",
+    "media:migrate": "node --experimental-strip-types scripts/migrate-media.ts"
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
@@ -31,6 +34,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "sharp": "0.35.5",
     "vite": "^8.3.0",
     "vite-plugin-pwa": "^2.0.0"
   },
@@ -40,9 +44,17 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "0.28.2",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "@firebase/firestore": {
+      "@grpc/grpc-js": "1.13.6"
+    },
+    "workbox-build": {
+      "glob": "14.0.4"
+    }
   }
 }

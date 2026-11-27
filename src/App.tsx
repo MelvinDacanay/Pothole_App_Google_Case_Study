@@ -1,17 +1,17 @@
 import React, { Component, useEffect, useState } from 'react';
+import { AccountConsentGate } from './components/AccountConsentGate';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppShell, NavTab } from './components/AppShell';
 import { PotholeRecord } from './lib/maps';
+import { AdminHubView } from './views/AdminHubView';
 import { HomeView } from './views/HomeView';
 import { MapView } from './views/MapView';
 import { CaptureView } from './views/CaptureView';
 import { LeaderboardView } from './views/LeaderboardView';
 import { ProfileView } from './views/ProfileView';
-import { CommunityReportsView } from './views/CommunityReportsView';
 import { MinigamesView } from './views/MinigamesView';
 import { LandingView } from './views/LandingView';
 import { firebaseClientConfigured } from './lib/firebase';
-import { hasPendingCapture } from './lib/pendingCapture';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -55,9 +55,8 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, ErrorBou
 }
 
 function AppExperience() {
-  const { authReady, user } = useAuth();
+  const { authReady, user, signOut, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('home');
-  const [subView, setSubView] = useState<'none' | 'community'>('none');
   const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
   const [selectedPothole, setSelectedPothole] = useState<PotholeRecord | null>(null);
   const [pendingFocusPotholeId, setPendingFocusPotholeId] = useState<string | null>(null);
@@ -70,34 +69,24 @@ function AppExperience() {
     return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
   }, []);
 
-  // A visitor who started a report on the landing page lands directly in capture
-  // once they sign in, where the stashed photo + location are ingested.
-  useEffect(() => {
-    if (user && hasPendingCapture()) {
-      setSubView('none');
-      setActiveTab('capture');
-    }
-  }, [user]);
+  useEffect(() => { if (!isAdmin && activeTab === 'admin') setActiveTab('home'); }, [isAdmin, activeTab]);
 
   const handleSelectTab = (tab: NavTab) => {
-    setSubView('none');
+    if (tab === 'admin' && !isAdmin) return;
     setActiveTab(tab);
   };
 
   const handleInspectPothole = (pothole: PotholeRecord) => {
-    setSubView('none');
     setSelectedPothole(pothole);
     setActiveTab('map');
   };
 
   const handleAddEvidence = (pothole: PotholeRecord) => {
-    setSubView('none');
     setPreselectedEvidenceTarget(pothole);
     setActiveTab('capture');
   };
 
   const handleSubmittedToMap = (potholeId: string) => {
-    setSubView('none');
     setPreselectedEvidenceTarget(null);
     setPendingFocusPotholeId(potholeId);
     setActiveTab('map');
@@ -143,14 +132,8 @@ function AppExperience() {
         {!user ? (
           <LandingView />
         ) : (
+        <AccountConsentGate key={user.uid} user={user} signOut={signOut}>
         <AppShell activeTab={activeTab} onSelectTab={handleSelectTab}>
-          {subView === 'community' ? (
-            <CommunityReportsView
-              onBack={() => setSubView('none')}
-              onInspectPothole={handleInspectPothole}
-            />
-          ) : (
-            <>
               {activeTab === 'home' && (
                 <HomeView
                   onNavigate={handleSelectTab}
@@ -168,7 +151,6 @@ function AppExperience() {
                     setPreselectedEvidenceTarget(null);
                     handleSelectTab('capture');
                   }}
-                  onOpenCommunity={() => setSubView('community')}
                 />
               )}
               {activeTab === 'capture' && (
@@ -178,17 +160,16 @@ function AppExperience() {
                   onSubmittedToMap={handleSubmittedToMap}
                 />
               )}
+              {activeTab === 'admin' && isAdmin && <AdminHubView />}
               {activeTab === 'leaderboard' && <LeaderboardView />}
               {activeTab === 'arcade' && <MinigamesView />}
               {activeTab === 'profile' && (
                 <ProfileView
-                  onOpenCommunity={() => setSubView('community')}
                   onOpenGames={() => handleSelectTab('arcade')}
                 />
               )}
-            </>
-          )}
         </AppShell>
+        </AccountConsentGate>
         )}
     </>
   );

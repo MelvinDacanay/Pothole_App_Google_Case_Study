@@ -1,0 +1,15 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {buildReportDraft} from '../server/adminDraft.ts';
+const ids=['p1','p2','p3','p4','p5'];
+const report={streetName:'Peachtree St NE',snapshotPotholeIds:ids,jurisdiction:'atldot',segmentId:'s1'};
+const photos=ids.map((id,i)=>({potholeId:id,primaryMediaId:'m'+i,status:'accepted',verificationStatus:'accepted',streetSource:'city_centerline',jurisdiction:'atldot',segmentId:'s1',lat:33.75+i/10000,lng:-84.39}));
+const sender='reports@example.com';
+test('creates exact standardized subject, fixed sender, recipient and five numbered attachments',()=>{const d=buildReportDraft(report,photos,sender);assert.equal(d.subject,'Pothole Report - Peachtree St NE - PatchUp (Local Initiative)');assert.equal(d.from,sender);assert.equal(d.to,'atl311@atlantaga.gov');assert.deepEqual(d.warnings,[]);assert.equal(d.attachments.length,5);assert.match(d.body,/Pothole 5: 33\.750400, -84\.390000/);assert.match(d.body,/About Us: We are PatchUp/);});
+test('blank sender remains unconfigured and warns',()=>{const d=buildReportDraft(report,photos,'');assert.equal(d.from,'');assert.match(d.warnings.join(' '),/PATCHUP_REPORT_FROM_EMAIL/);});
+test('nonaccepted, invalid coordinates and missing records excluded',()=>{const d=buildReportDraft(report,[{...photos[0],status:'provisional'},{...photos[1],lat:NaN},...photos.slice(3)],sender);assert.equal(d.attachments.length,2);assert.equal(d.warnings.length,3);});
+test('duplicate snapshot ids cannot count twice',()=>{const d=buildReportDraft({...report,snapshotPotholeIds:['p1','p1','p2','p3','p4']},photos,sender);assert.equal(d.attachments.length,4);assert.match(d.warnings.join(' '),/Fewer than five/);});
+test('extra observations are flagged, first five preserved',()=>{const d=buildReportDraft({...report,snapshotPotholeIds:[...ids,'p6']},photos,sender);assert.equal(d.attachments.length,5);assert.match(d.warnings.join(' '),/more than five/);});
+test('street subject strips header line breaks',()=>{const d=buildReportDraft({...report,streetName:'Street\r\nBcc: x'},photos,sender);assert.doesNotMatch(d.subject,/[\r\n]/);});
+test('jurisdiction and changed corridor are flagged',()=>{const d=buildReportDraft({...report,jurisdiction:'gdot'},[{...photos[0],segmentId:'s2',jurisdiction:'gdot'},...photos.slice(1)],sender);assert.equal(d.warnings.length,3);});
+test('a repeated attachment is not counted twice',()=>{const d=buildReportDraft(report,[photos[0],{...photos[1],primaryMediaId:photos[0].primaryMediaId},...photos.slice(2)],sender);assert.equal(d.attachments.length,4);assert.match(d.warnings.join(' '),/repeats a photo/);});

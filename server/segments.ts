@@ -1,4 +1,6 @@
 import { FieldValue, type Firestore, type Timestamp } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
+import { getAllowedAdminEmails, isAllowedAdminAccount, normalizeEmail } from './adminAuthorization.ts';
 import {
   classifyJurisdiction,
   haversineMeters,
@@ -466,20 +468,9 @@ export async function evaluateSegmentMembershipAndThreshold(
     const nextCycleDistinctCount = countedMembers.length + 1;
     const nextTotalDistinct = Number(seg.distinctAcceptedCount || 0) + 1;
 
-    tx.set(memberRef, {
-      potholeId,
-      segmentId,
-      cycleNumber,
-      countedForThreshold: true,
-      streetName: String(pot.streetName || seg.streetName).slice(0, 128),
-      lat: Number(pot.lat),
-      lng: Number(pot.lng),
-      addedAt: FieldValue.serverTimestamp(),
-    });
-
     const segConfidence = (seg.confidence as SegmentConfidence) || 'needs_review';
     const shouldCreateReport =
-      segConfidence === 'verified' &&
+      (segConfidence === 'verified' || (seg.jurisdiction==='unknown' && ['user_observed','city_centerline'].includes(String(pot.streetSource)) && !/\b(ramp|exit|milepost|overpass|viaduct|bridge|interchange|collector)\b|[&/]/i.test(String(pot.streetName||'')))) &&
       nextCycleDistinctCount >= THRESHOLD_DISTINCT_COUNT &&
       !existingReportDoc.exists;
 
@@ -490,6 +481,17 @@ export async function evaluateSegmentMembershipAndThreshold(
       const snapshotPotRefs = snapshotIds.map((id) => db.collection('potholes').doc(id));
       const snapshotPotDocs =
         snapshotPotRefs.length > 0 ? await tx.getAll(...snapshotPotRefs) : [];
+
+      tx.set(memberRef, {
+        potholeId,
+        segmentId,
+        cycleNumber,
+        countedForThreshold: true,
+        streetName: String(pot.streetName || seg.streetName).slice(0, 128),
+        lat: Number(pot.lat),
+        lng: Number(pot.lng),
+        addedAt: FieldValue.serverTimestamp(),
+      });
 
       let sumLat = 0;
       let sumLng = 0;
@@ -547,6 +549,17 @@ export async function evaluateSegmentMembershipAndThreshold(
       };
     }
 
+    tx.set(memberRef, {
+      potholeId,
+      segmentId,
+      cycleNumber,
+      countedForThreshold: true,
+      streetName: String(pot.streetName || seg.streetName).slice(0, 128),
+      lat: Number(pot.lat),
+      lng: Number(pot.lng),
+      addedAt: FieldValue.serverTimestamp(),
+    });
+
     tx.update(segRef, {
       distinctAcceptedCount: nextTotalDistinct,
       currentCycleDistinctCount: nextCycleDistinctCount,
@@ -566,7 +579,15 @@ export async function evaluateSegmentMembershipAndThreshold(
 
   if (txResult.reportCreated && txResult.reportId) {
     const adminsSnap = await db.collection('admins').limit(10).get();
-    const adminUids = adminsSnap.docs.map((d) => d.id);
+    const allowlist = getAllowedAdminEmails();
+    const candidates = adminsSnap.docs.filter(d => allowlist.has(normalizeEmail(d.data().email)));
+    const checked = await Promise.all(candidates.map(async d => {
+      try {
+        const account = await getAuth().getUser(d.id);
+        return isAllowedAdminAccount(account, allowlist) && normalizeEmail(account.email) === normalizeEmail(d.data().email) ? d.id : null;
+      } catch { return null; }
+    }));
+    const adminUids = checked.filter((uid): uid is string => uid !== null);
     const allTargets = Array.from(new Set([...txResult.notifyUids, ...adminUids]));
 
     await Promise.all(
@@ -848,7 +869,13 @@ export async function adminReviewPothole(
     updates.segmentConfidence = params.segmentConfidence;
   }
 
-  await potRef.update(updates);
+  await db.runTransaction(async tx=>{
+    const current=await tx.get(potRef);
+    if(!current.exists || String(current.data()?.status||'accepted')!==prevStatus) throw new Error('Pothole status changed. Reload and retry.');
+    if((prevStatus==='provisional'||prevStatus==='rejected')&&nextStatus!==prevStatus) throw new Error('Use the pending submission review workflow. Rejected records cannot be reopened.');
+    if(nextStatus==='provisional'&&prevStatus!=='provisional') throw new Error('Accepted contributions cannot be returned to provisional review.');
+    tx.update(potRef,updates);
+  });
 
   let segmentId = typeof prev.segmentId === 'string' && prev.segmentId ? prev.segmentId : null;
   if (!segmentId && ACCEPTED_HISTORICAL_STATUSES.has(nextStatus)) {
@@ -879,7 +906,7 @@ export async function adminReviewPothole(
   if (nextStatus === 'repaired' && prevStatus !== 'repaired') {
     const contribUid = String(prev.primaryContributorUid || '');
     const contribUsername = String(prev.primaryContributorUsername || 'atlanta_user');
-    const contribDisplay = String(prev.primaryContributorDisplayName || 'Contributor');
+    const contribDisplay = String(prev.primaryContributorDisplayName || 'Patcher');
     if (contribUid) {
       await Promise.all([
         evaluateUserAchievements(db, contribUid, true).catch(() => {}),
@@ -1210,7 +1237,7 @@ export async function adminTransitionReportStatus(
   const txOutcome = await db.runTransaction(async (tx) => {
     const reportSnap = await tx.get(reportRef);
     if (!reportSnap.exists) {
-      throw new Error('Civic report record not found.');
+      throw new Error('Community report record not found.');
     }
     const report = reportSnap.data()!;
     const currentStatus = report.status as ReportStatus;

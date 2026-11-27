@@ -1,6 +1,6 @@
 {
   "name": "PatchUp",
-  "description": "Atlanta crowdsourced pothole documentation, civic street-level reporting, and social road-safety PWA.",
+  "description": "Atlanta crowdsourced pothole documentation, community street-level reporting, and social road-safety PWA.",
   "requestFramePermissions": ["camera", "geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

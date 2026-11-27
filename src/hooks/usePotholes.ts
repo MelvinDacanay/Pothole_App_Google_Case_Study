@@ -8,43 +8,7 @@ export function useCommunityPotholes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!db) {
-      setLoading(false);
-      setPotholes([]);
-      setError(null);
-      return;
-    }
-
-    const q = query(
-      collection(db, 'potholes'),
-      where('status', '!=', 'rejected'),
-      limit(150)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const items = snap.docs
-          .map((d) => d.data() as PotholeRecord)
-          .sort((a, b) => {
-            const aMs = a.createdAt?.toMillis?.() ?? 0;
-            const bMs = b.createdAt?.toMillis?.() ?? 0;
-            return bMs - aMs;
-          });
-        setPotholes(items);
-        setLoading(false);
-        setError(null);
-      },
-      (err) => {
-        setLoading(false);
-        setError(err instanceof Error ? err.message : 'Unable to load community potholes.');
-        handleFirestoreError(err, OperationType.LIST, 'potholes');
-      }
-    );
-
-    return () => unsub();
-  }, []);
+  useEffect(()=>{let active=true;const load=async()=>{if(document.visibilityState==='hidden')return;try{const r=await fetch('/api/community/potholes');if(!r.ok)throw new Error('Unable to load map.');const d=await r.json();if(active){setPotholes(d.items||[]);setError(null);}}catch{if(active)setError('Unable to load community potholes.');}finally{if(active)setLoading(false);}};void load();const timer=window.setInterval(load,30000);document.addEventListener('visibilitychange',load);return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',load);};},[]);
 
   return { potholes, loading, error };
 }

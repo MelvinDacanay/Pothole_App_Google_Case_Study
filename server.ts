@@ -1,28 +1,32 @@
+import {publicPothole,publicEvidence,publicActivity} from './server/publicCommunity.ts';
+import { loadMediaBytes, storeSanitizedUpload, isReadableMedia, mediaBackend, runMediaMaintenance } from './server/mediaStore.ts';
+import { decodeUpload, PHOTO_PRIVACY_VERSION } from './server/photoPrivacy.ts';
+import { lookupCityRoad, confirmRoad } from './server/roadLocation.ts';
+import { buildReportDraft } from './server/adminDraft.ts';
 import 'dotenv/config';
+import { CONSENT_VERSION, hasAccountConsent, saveAccountConsent, validConsentRequest } from './server/consent.ts';
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer as createViteServer } from 'vite';
-import { initializeApp, cert, getApps, type App as AdminApp } from 'firebase-admin/app';
+import { initializeApp, cert, applicationDefault, getApps, type App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth, type DecodedIdToken } from 'firebase-admin/auth';
+import { credentialMode, verifyCloudRunIdentity } from './server/runtimeAuth.ts';
+import { authorizeAdmin, normalizeEmail, reconcileAdminDirectory, revokeLegacyAdmin } from './server/adminAuthorization.ts';
 import {
   FieldValue,
   getFirestore as getAdminFirestore,
   type Timestamp,
 } from 'firebase-admin/firestore';
 import {
-  classifyJurisdiction,
   haversineMeters,
   isValidCoordinatePair,
   isWithinAtlantaMetro,
-  MapsQuotaError,
   normalizeStreetName,
-  reverseGeocodeCoords,
   scoreDuplicateCandidate,
 } from './server/geo.ts';
 import {
-  analyzePotholeImageWithGemini,
   getConfiguredGeminiModel,
 } from './server/gemini.ts';
 import {
@@ -31,7 +35,6 @@ import {
   getCurrentMonthKey,
   getCurrentWeekKey,
   makeFriendshipId,
-  recordContributionSocialImpact,
   syncUserLeaderboardProfile,
 } from './server/social.ts';
 import {
@@ -52,7 +55,11 @@ import {
   recordValidatedGameScore,
   validateGameScorePayload,
 } from './server/games.ts';
-import { createRateLimiter } from './server/rateLimit.ts';
+import { createRateLimiter, checkRateLimit } from './server/rateLimit.ts';
+import { verifyImage, publicVerification } from './server/verification.ts';
+import { commitVerifiedSubmission, commitPendingReview } from './server/submission.ts';
+import { autoAcceptEnabled } from './server/verificationPolicy.ts';
+import { finishContribution } from './server/contributions.ts';
 import { deleteUserAccountAndPersonalData } from './server/account.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +69,33 @@ const SAFE_ID_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
 const ALLOWED_MEDIA_CONTENT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const ALLOWED_COORD_SOURCES = new Set(['gps_verified', 'exif_extracted', 'manual_pin']);
 const ALLOWED_SEVERITIES = new Set(['low', 'moderate', 'severe', 'unclassified']);
+
+async function syncUserPotholeContributorIdentity(
+  db: FirebaseFirestore.Firestore,
+  uid: string
+): Promise<void> {
+  const [userSnap, potholesSnap] = await Promise.all([
+    db.collection('users').doc(uid).get(),
+    db.collection('potholes').where('primaryContributorUid', '==', uid).limit(500).get(),
+  ]);
+  if (!userSnap.exists || potholesSnap.empty) return;
+
+  const userData = userSnap.data()!;
+  const photoURL =
+    typeof userData.photoURL === 'string' && userData.photoURL.length <= 512
+      ? userData.photoURL
+      : undefined;
+  const batch = db.batch();
+  for (const potholeDoc of potholesSnap.docs) {
+    batch.update(potholeDoc.ref, {
+      primaryContributorUsername: String(userData.username || 'atlanta_user').slice(0, 32),
+      primaryContributorDisplayName: String(userData.displayName || 'Patcher').slice(0, 64),
+      ...(photoURL ? { primaryContributorPhotoURL: photoURL } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
+}
 
 interface FirebaseClientConfig {
   projectId: string;
@@ -87,20 +121,24 @@ const firebaseConfig = loadFirebaseConfig();
 let adminApp: AdminApp | null = null;
 let adminSdkMode: 'service_account' | 'adc_or_project' | 'unconfigured' = 'unconfigured';
 
+const runtimeCredentialMode = credentialMode(process.env); // Invalid Cloud Run overrides terminate startup.
 if (firebaseConfig) {
   try {
     if (getApps().length > 0) {
+      if (process.env.K_SERVICE || process.env.CLOUD_RUN_JOB) throw new Error('Unexpected preinitialized Firebase app.');
       adminApp = getApps()[0] ?? null;
       adminSdkMode = 'adc_or_project';
-    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    } else if (runtimeCredentialMode === 'service_account') {
+      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON!);
+      if (parsed.project_id !== firebaseConfig.projectId) throw new Error('Firebase credential project mismatch.');
       adminApp = initializeApp({
         credential: cert(parsed),
         projectId: firebaseConfig.projectId,
       });
       adminSdkMode = 'service_account';
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    } else if (runtimeCredentialMode === 'adc') {
       adminApp = initializeApp({
+        credential: applicationDefault(),
         projectId: firebaseConfig.projectId,
       });
       adminSdkMode = 'adc_or_project';
@@ -112,7 +150,8 @@ if (firebaseConfig) {
       adminSdkMode = 'unconfigured';
     }
   } catch (err) {
-    console.warn('Firebase Admin SDK initialization deferred:', err);
+    if (process.env.K_SERVICE || process.env.CLOUD_RUN_JOB) throw new Error('Cloud Run Firebase initialization failed.');
+    console.warn('Firebase Admin SDK initialization deferred; check server credentials.');
     adminApp = null;
     adminSdkMode = 'unconfigured';
   }
@@ -120,8 +159,9 @@ if (firebaseConfig) {
 
 export function getServerFirestore() {
   if (!adminApp || !firebaseConfig) return null;
-  return firebaseConfig.firestoreDatabaseId
-    ? getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId)
+  const dbId = firebaseConfig.firestoreDatabaseId?.trim();
+  return dbId && dbId !== '(default)'
+    ? getAdminFirestore(adminApp, dbId)
     : getAdminFirestore(adminApp);
 }
 
@@ -156,111 +196,15 @@ function resolveBrowserMapsApiKey(): string {
 function resolveServerMapsApiKey(): string {
   return (
     process.env.GOOGLE_MAPS_SERVER_API_KEY ||
-    process.env.GOOGLE_MAPS_API_KEY ||
-    process.env.VITE_GOOGLE_MAPS_API_KEY ||
-    process.env.MAPS_API_KEY ||
     ''
   );
-}
-
-interface MediaPayload {
-  contentType: string;
-  buffer: Buffer;
-  ownerId?: string;
-}
-
-function extractBytesBuffer(rawBytes: unknown): Buffer | null {
-  if (Buffer.isBuffer(rawBytes)) return rawBytes;
-  if (rawBytes instanceof Uint8Array) return Buffer.from(rawBytes);
-  if (
-    rawBytes &&
-    typeof rawBytes === 'object' &&
-    'toUint8Array' in rawBytes &&
-    typeof (rawBytes as { toUint8Array: () => Uint8Array }).toUint8Array === 'function'
-  ) {
-    return Buffer.from((rawBytes as { toUint8Array: () => Uint8Array }).toUint8Array());
-  }
-  return null;
-}
-
-async function fetchMediaViaAdminSdk(mediaId: string): Promise<MediaPayload | null> {
-  const serverDb = getServerFirestore();
-  if (!serverDb) return null;
-  const snap = await serverDb.collection('mediaObjects').doc(mediaId).get();
-  if (!snap.exists) return null;
-
-  const docData = snap.data();
-  if (!docData) return null;
-
-  const contentType = typeof docData.contentType === 'string' ? docData.contentType : '';
-  if (!ALLOWED_MEDIA_CONTENT_TYPES.has(contentType)) {
-    throw new Error('Unsupported media contentType stored in mediaObjects');
-  }
-
-  const buffer = extractBytesBuffer(docData.data);
-  if (!buffer || buffer.length === 0) {
-    throw new Error('Empty binary media payload');
-  }
-
-  return {
-    contentType,
-    buffer,
-    ownerId: typeof docData.ownerId === 'string' ? docData.ownerId : undefined,
-  };
-}
-
-async function fetchMediaViaFirestoreRest(mediaId: string): Promise<MediaPayload | null> {
-  if (!firebaseConfig) {
-    throw new Error('Firebase configuration is unavailable');
-  }
-  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-  const baseUrl =
-    `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(firebaseConfig.projectId)}` +
-    `/databases/${encodeURIComponent(databaseId)}/documents/mediaObjects/${encodeURIComponent(mediaId)}`;
-  const url = firebaseConfig.apiKey
-    ? `${baseUrl}?key=${encodeURIComponent(firebaseConfig.apiKey)}`
-    : baseUrl;
-
-  const resp = await fetch(url);
-  if (resp.status === 404) {
-    return null;
-  }
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Firestore REST error (${resp.status}): ${errText}`);
-  }
-
-  const json = (await resp.json()) as {
-    fields?: {
-      contentType?: { stringValue?: string };
-      ownerId?: { stringValue?: string };
-      data?: { bytesValue?: string };
-    };
-  };
-
-  const contentType = json.fields?.contentType?.stringValue ?? '';
-  const bytesBase64 = json.fields?.data?.bytesValue ?? '';
-
-  if (!ALLOWED_MEDIA_CONTENT_TYPES.has(contentType) || !bytesBase64) {
-    throw new Error('Invalid media document structure');
-  }
-
-  const buffer = Buffer.from(bytesBase64, 'base64');
-  if (buffer.length === 0) {
-    throw new Error('Decoded binary media payload is empty');
-  }
-
-  return {
-    contentType,
-    buffer,
-    ownerId: json.fields?.ownerId?.stringValue,
-  };
 }
 
 async function verifyBearerToken(
   req: express.Request,
   res: express.Response,
-  requireVerifiedEmail = true
+  requireVerifiedEmail = true,
+  checkRevoked = false
 ): Promise<DecodedIdToken | null> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -273,7 +217,7 @@ async function verifyBearerToken(
   }
   const token = authHeader.slice('Bearer '.length).trim();
   try {
-    const decoded = await getAdminAuth(adminApp).verifyIdToken(token);
+    const decoded = await getAdminAuth(adminApp).verifyIdToken(token, checkRevoked);
     if (requireVerifiedEmail && !decoded.email_verified) {
       res.status(403).json({ error: 'Verified email required to submit road-condition records.' });
       return null;
@@ -288,29 +232,32 @@ async function verifyBearerToken(
   }
 }
 
+async function requireAccountConsent(db: NonNullable<ReturnType<typeof getServerFirestore>>, uid: string, res: express.Response): Promise<boolean> {
+  try {
+    if (await hasAccountConsent(db, uid)) return true;
+    res.status(403).json({error:'Complete the required account confirmations before continuing.'});
+  } catch { res.status(503).json({error:'Unable to verify account consent. Please retry.'}); }
+  return false;
+}
+
 async function requireAdmin(
   req: express.Request,
   res: express.Response
 ): Promise<{ decoded: DecodedIdToken; actor: AdminActor } | null> {
-  const decoded = await verifyBearerToken(req, res, true);
+  const decoded = await verifyBearerToken(req, res, true, true);
   if (!decoded) return null;
 
-  const serverDb = getServerFirestore();
-  if (!serverDb || !adminFirestoreReady) {
+  if (!getServerFirestore() || !adminFirestoreReady || !adminApp) {
     res.status(503).json({ error: 'Server Firestore database unavailable.' });
     return null;
   }
-
-  let hasAdminDoc = false;
   try {
-    const adminSnap = await serverDb.collection('admins').doc(decoded.uid).get();
-    hasAdminDoc = adminSnap.exists;
+    if (!await authorizeAdmin(getAdminAuth(adminApp), decoded)) {
+      res.status(403).json({ error: 'Admin privileges required for community oversight actions.' });
+      return null;
+    }
   } catch {
-    hasAdminDoc = false;
-  }
-
-  if (!decoded.admin && !hasAdminDoc) {
-    res.status(403).json({ error: 'Admin privileges required for civic oversight actions.' });
+    res.status(503).json({ error: 'Unable to verify administrator access.' });
     return null;
   }
 
@@ -323,27 +270,20 @@ async function requireAdmin(
   };
 }
 
-function getAllowedAdminEmails(): Set<string> {
-  const configured =
-    process.env.PATCHUP_ADMIN_EMAILS ||
-    [
-      'devkotaarya@gmail.com',
-      'pandeysaksham450@gmail.com',
-      'amariyahcg@gmail.com',
-      'birukgebru23@gmail.com',
-      'carolinesalinas09@gmail.com',
-      'melvindacanay05@gmail.com',
-    ].join(',');
-  return new Set(
-    configured
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
-  );
-}
-
 async function startServer() {
+  if (process.env.K_SERVICE || process.env.CLOUD_RUN_JOB) {
+    if (!firebaseConfig) throw new Error('Cloud Run requires Firebase project configuration.');
+    await verifyCloudRunIdentity(firebaseConfig.projectId);
+  }
   await probeAdminFirestore();
+  if ((process.env.K_SERVICE || process.env.CLOUD_RUN_JOB) && (!adminApp || !adminFirestoreReady)) {
+    throw new Error('Cloud Run requires working Firebase ADC and Firestore access.');
+  }
+  const startupDb = getServerFirestore();
+  if (adminApp && startupDb && adminFirestoreReady && process.env.PATCHUP_ADMIN_EMAILS !== undefined && !process.env.FIRESTORE_EMULATOR_HOST) {
+    try { await reconcileAdminDirectory(getAdminAuth(adminApp), startupDb); }
+    catch { console.warn('Administrator directory reconciliation incomplete; retry on next startup or sign-in.'); }
+  }
   const app = express();
   const port = Number(process.env.PORT) || 3000;
 
@@ -359,6 +299,7 @@ async function startServer() {
   app.use(express.json({ limit: '1mb' }));
 
   // Bounded rate limiters for expensive & mutating endpoints
+  app.use('/api/media', createRateLimiter({scope:'media_read',maxRequests:180,windowMs:60_000}));
   app.use(
     '/api/geocode/reverse',
     createRateLimiter({ scope: 'geocode', maxRequests: 35, windowMs: 60_000 })
@@ -397,8 +338,8 @@ async function startServer() {
       firebaseConfigured: Boolean(firebaseConfig),
       firebaseProjectId: firebaseConfig?.projectId ?? null,
       firestoreDatabaseId: firebaseConfig?.firestoreDatabaseId ?? null,
-      firebaseStorageEnabled: false,
-      mediaStoreMode: 'firestore_isolated_mediaObjects_spark_free',
+      firebaseStorageEnabled: mediaBackend()==='gcs',
+      mediaStoreMode: mediaBackend(),
       mapsConfigured: Boolean(mapsBrowserKey),
       adminSdkMode,
       adminAuthVerifyReady: Boolean(adminApp),
@@ -410,6 +351,8 @@ async function startServer() {
         process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
       ),
       geminiModel: getConfiguredGeminiModel(),
+      imageAiEnabled:process.env.PATCHUP_IMAGE_AI_ENABLED==='true'&&process.env.PATCHUP_GEMINI_DATA_MODE==='paid',
+      imageAutoAcceptEnabled:autoAcceptEnabled(),
     });
   });
 
@@ -423,13 +366,33 @@ async function startServer() {
   });
 
   app.get('/api/auth/session', async (req, res) => {
-    const decoded = await verifyBearerToken(req, res, false);
+    const decoded = await verifyBearerToken(req, res, false, true);
     if (!decoded) return;
-    res.json({
-      uid: decoded.uid,
-      emailVerified: Boolean(decoded.email_verified),
-      admin: Boolean(decoded.admin),
-    });
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      res.json({ uid: decoded.uid, emailVerified: Boolean(decoded.email_verified), admin: Boolean(adminApp && await authorizeAdmin(getAdminAuth(adminApp), decoded)) });
+    } catch { res.status(503).json({ error: 'Unable to verify session.' }); }
+  });
+
+  // Account consent is stored by the Admin SDK, never trusted from an image request.
+  app.get('/api/auth/consent', async (req, res) => {
+    const decoded = await verifyBearerToken(req, res, true);
+    if (!decoded) return;
+    res.setHeader('Cache-Control', 'no-store');
+    const db = getServerFirestore();
+    if (!db || !adminFirestoreReady) { res.status(503).json({error:'Consent service unavailable.'}); return; }
+    try { res.json({accepted: await hasAccountConsent(db, decoded.uid), version: CONSENT_VERSION}); }
+    catch { res.status(503).json({error:'Unable to load account consent. Please retry.'}); }
+  });
+  app.post('/api/auth/consent', async (req, res) => {
+    const decoded = await verifyBearerToken(req, res, true);
+    if (!decoded) return;
+    res.setHeader('Cache-Control', 'no-store');
+    if (!validConsentRequest(req.body)) { res.status(400).json({error:'Both confirmations and the current consent version are required.'}); return; }
+    const db = getServerFirestore();
+    if (!db || !adminFirestoreReady) { res.status(503).json({error:'Consent service unavailable.'}); return; }
+    try { await saveAccountConsent(db, decoded.uid); res.json({accepted:true, version:CONSENT_VERSION}); }
+    catch { res.status(503).json({error:'Unable to save account consent. Please retry.'}); }
   });
 
   app.post('/api/geocode/reverse', async (req, res) => {
@@ -443,31 +406,10 @@ async function startServer() {
       return;
     }
 
-    try {
-      const serverDb = adminFirestoreReady ? getServerFirestore() : null;
-      const result = await reverseGeocodeCoords({
-        lat,
-        lng,
-        apiKey: resolveServerMapsApiKey(),
-        firestoreDb: serverDb,
-      });
-      res.json({
-        ...result,
-        inAtlantaMetro: isWithinAtlantaMetro(lat, lng),
-      });
-    } catch (err) {
-      if (err instanceof MapsQuotaError) {
-        res.status(429).json({
-          error: err.message,
-          quotaExceeded: true,
-        });
-        return;
-      }
-      res.status(502).json({
-        error: 'Reverse geocoding failed.',
-        detail: err instanceof Error ? err.message : 'Unexpected error',
-      });
-    }
+    const db=getServerFirestore(); if(!db){res.status(503).json({error:'Location service unavailable.'});return;}
+    if(!await requireAccountConsent(db,decoded.uid,res))return;
+    const match=await lookupCityRoad(db,decoded.uid,lat,lng);
+    res.json({...match,streetName:match?.streetName||'',source:match?'city_centerline':'coordinate_fallback',inAtlantaMetro:isWithinAtlantaMetro(lat,lng)});
   });
 
   app.post('/api/potholes/candidates', async (req, res) => {
@@ -506,7 +448,7 @@ async function startServer() {
           const pLat = Number(data.lat);
           const pLng = Number(data.lng);
           const dist = haversineMeters(lat, lng, pLat, pLng);
-          if (dist > 25 || data.status === 'rejected') return null;
+          if (dist > 25 || !['accepted','reported','acknowledged'].includes(String(data.status))) return null;
 
           const updatedAt = data.updatedAt as Timestamp | undefined;
           return scoreDuplicateCandidate({
@@ -517,7 +459,7 @@ async function startServer() {
               potholeId: String(data.potholeId || d.id),
               lat: pLat,
               lng: pLng,
-              formattedAddress: String(data.formattedAddress || ''),
+              formattedAddress: String(data.streetName || ''),
               streetName: String(data.streetName || ''),
               normalizedStreet: String(data.normalizedStreet || ''),
               primaryPhotoUrl: String(data.primaryPhotoUrl || ''),
@@ -545,56 +487,42 @@ async function startServer() {
     }
   });
 
+  app.post('/api/media/upload',async(req,res)=>{
+    const decoded=await verifyBearerToken(req,res,true);if(!decoded)return;
+    const db=getServerFirestore();if(!db){res.status(503).json({error:'Photo storage unavailable.'});return;}
+    if(!await requireAccountConsent(db,decoded.uid,res))return;
+    if(req.body?.privacyConfirmed!==true){res.status(400).json({error:'Review the photo for personal details before uploading.'});return;}
+    const rate=checkRateLimit({scope:'photo_upload_uid',key:decoded.uid,maxRequests:6,windowMs:60_000});if(!rate.allowed){res.status(429).json({error:'Too many uploads. Please wait.'});return;}
+    try{const result=await storeSanitizedUpload(db,{uid:decoded.uid,mediaId:String(req.body?.mediaId||''),bytes:decodeUpload(req.body?.data),mime:String(req.body?.contentType||'')});res.status(201).json(result);}catch{res.status(400).json({error:'Photo could not be saved. Check the format, upload allowance, or try again.'});}
+  });
+
+  app.post('/api/admin/media-maintenance',async(req,res)=>{
+    if(!await requireAdmin(req,res))return;
+    try{res.json(await runMediaMaintenance(getServerFirestore()!));}catch{res.status(503).json({error:'Photo cleanup unavailable.'});}
+  });
+
   app.post('/api/potholes/analyze', async (req, res) => {
     const decoded = await verifyBearerToken(req, res, true);
     if (!decoded) return;
-
-    const mediaId = typeof req.body?.mediaId === 'string' ? req.body.mediaId.trim() : '';
-    const candidateMediaId =
-      typeof req.body?.candidateMediaId === 'string' ? req.body.candidateMediaId.trim() : '';
-    const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 240) : undefined;
-
-    if (!SAFE_ID_REGEX.test(mediaId)) {
-      res.status(400).json({ error: 'Invalid mediaId.' });
-      return;
-    }
-
+    const serverDb = getServerFirestore();
+    if (!serverDb || !adminFirestoreReady) { res.status(503).json({error:'Verification database unavailable.'}); return; }
+    const mediaId = typeof req.body?.mediaId === 'string' ? req.body.mediaId : '';
+    if (!SAFE_ID_REGEX.test(mediaId)) { res.status(400).json({error:'Invalid media ID.'}); return; }
+    if (!(await requireAccountConsent(serverDb, decoded.uid, res))) return;
+    if (process.env.PATCHUP_IMAGE_AI_ENABLED !== 'true' || process.env.PATCHUP_GEMINI_DATA_MODE !== 'paid') { res.status(503).json({error:'Photo verification is temporarily disabled.'}); return; }
+    const rate = checkRateLimit({scope:'verification_uid',key:decoded.uid,maxRequests:8,windowMs:60_000});
+    if (!rate.allowed) {res.setHeader('Retry-After',String(rate.retryAfterSeconds));res.status(429).json({error:'Please wait before checking another photo.'});return;}
     try {
-      const media = await fetchMediaViaAdminSdk(mediaId);
-      if (!media) {
-        res.status(404).json({ error: 'Uploaded media object not found.' });
-        return;
-      }
-      if (media.ownerId && media.ownerId !== decoded.uid) {
-        res.status(403).json({ error: 'You do not own this uploaded media object.' });
-        return;
-      }
-
-      let candidateMedia: MediaPayload | null = null;
-      if (candidateMediaId && SAFE_ID_REGEX.test(candidateMediaId)) {
-        candidateMedia = await fetchMediaViaAdminSdk(candidateMediaId).catch(() => null);
-      }
-
-      const analysis = await analyzePotholeImageWithGemini({
-        mediaBuffer: media.buffer,
-        mimeType: media.contentType,
-        candidateBuffer: candidateMedia?.buffer ?? null,
-        candidateMimeType: candidateMedia?.contentType ?? null,
-        notes,
-      });
-
-      res.json(analysis);
+      const m=(await serverDb.collection('mediaObjects').doc(mediaId).get()).data();
+      if (!isReadableMedia(m) || m.ownerId !== decoded.uid || m.privacyVersion!==PHOTO_PRIVACY_VERSION || !mediaId.startsWith('med_')) {res.status(404).json({error:'Your uploaded photo was not found.'});return;}
+      const media=await loadMediaBytes(mediaId,m,'evidence','analysis');
+      const record=await verifyImage(serverDb,{uid:decoded.uid,mediaId,bytes:media.buffer,mime:media.contentType,consent:true});
+      res.setHeader('Cache-Control','no-store');res.json(publicVerification(record));
     } catch (err) {
-      res.json({
-        available: false,
-        status: 'unavailable',
-        model: getConfiguredGeminiModel(),
-        isRoadDefect: true,
-        severityLabel: 'unclassified',
-        confidence: 0,
-        summary: 'Optional image analysis unavailable; capture continues normally.',
-        error: err instanceof Error ? err.message : 'Analysis error',
-      });
+      const message=err instanceof Error?err.message:'';
+      if (message==='An image check is already running. Retry shortly.' || message==='Image check superseded. Retry shortly.') {res.status(409).json({error:message});return;}
+      if(message==='This photo was already submitted.') {res.status(409).json({error:message});return;}
+      res.status(400).json({error:'Unable to verify this photo. Check the image format or try again.'});
     }
   });
 
@@ -607,6 +535,8 @@ async function startServer() {
       res.status(503).json({ error: 'Server Firestore database unavailable.' });
       return;
     }
+
+    if (!(await requireAccountConsent(serverDb, decoded.uid, res))) return;
 
     const body = req.body ?? {};
     const submissionId =
@@ -634,41 +564,22 @@ async function startServer() {
           .slice(0, 5)
       : [];
 
-    const formattedAddress = String(body.formattedAddress || `${lat.toFixed(5)}, ${lng.toFixed(5)}, Atlanta, GA`)
-      .trim()
-      .slice(0, 256);
-    const streetName = String(body.streetName || formattedAddress.split(',')[0] || 'Unverified Street')
-      .trim()
-      .slice(0, 128);
-    const normalizedStreet = normalizeStreetName(streetName) || 'unverified street';
-    const neighborhood = typeof body.neighborhood === 'string' ? body.neighborhood.trim().slice(0, 128) : '';
-    const city = typeof body.city === 'string' && body.city.trim() ? body.city.trim().slice(0, 64) : 'Atlanta';
-    const state = typeof body.state === 'string' && body.state.trim() ? body.state.trim().slice(0, 32) : 'GA';
-    const postalCode = typeof body.postalCode === 'string' ? body.postalCode.trim().slice(0, 20) : '';
-    const placeId = typeof body.placeId === 'string' ? body.placeId.trim().slice(0, 128) : '';
-    const jurisdiction = classifyJurisdiction(streetName, formattedAddress, city);
     const locationUserCorrected = Boolean(body.locationUserCorrected);
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 400) : '';
     const duplicateConfidence = Number.isFinite(Number(body.duplicateConfidence))
       ? Math.min(1, Math.max(0, Number(body.duplicateConfidence)))
       : 0;
 
-    const aiStatus =
-      body.aiClassificationStatus === 'completed' || body.aiClassificationStatus === 'unavailable'
-        ? body.aiClassificationStatus
-        : 'skipped';
-    const aiSeverityLabel = ALLOWED_SEVERITIES.has(String(body.aiSeverityLabel))
-      ? String(body.aiSeverityLabel)
-      : 'unclassified';
-    const aiIsRoadDefect = typeof body.aiIsRoadDefect === 'boolean' ? body.aiIsRoadDefect : true;
-    const aiSummary = typeof body.aiSummary === 'string' ? body.aiSummary.trim().slice(0, 300) : '';
-
+    const verificationId = typeof body.verificationId === 'string' ? body.verificationId : '';
+    if (!SAFE_ID_REGEX.test(verificationId)) {res.status(400).json({error:'A server photo verification is required.'});return;}
+    const requestedAction = actionType;
+    if(actionType==='new_pothole'&&targetPotholeId){res.status(400).json({error:'New potholes cannot include an evidence target.'});return;}
     if (!SAFE_ID_REGEX.test(mediaId)) {
       res.status(400).json({ error: 'Valid mediaId is required.' });
       return;
     }
-    if (!isValidCoordinatePair(lat, lng)) {
-      res.status(400).json({ error: 'Valid latitude and longitude coordinates are required.' });
+    if (typeof body.lat !== 'number' || typeof body.lng !== 'number' || !isValidCoordinatePair(lat, lng) || !isWithinAtlantaMetro(lat,lng)) {
+      res.status(400).json({ error: 'Valid Atlanta metro coordinates are required.' });
       return;
     }
     if (!ALLOWED_COORD_SOURCES.has(coordinateSource)) {
@@ -684,228 +595,13 @@ async function startServer() {
       return;
     }
 
+    if(body.locationConfirmed!==true){res.status(400).json({error:'Confirm the pothole location first.'});return;}
     try {
-      const txResult = await serverDb.runTransaction(async (tx) => {
-        const subRef = serverDb.collection('submissions').doc(submissionId);
-        const existingSub = await tx.get(subRef);
-        if (existingSub.exists) {
-          const existingData = existingSub.data()!;
-          return {
-            idempotent: true,
-            submissionId,
-            potholeId: existingData.potholeId,
-            duplicateStatus: existingData.duplicateStatus,
-          };
-        }
+      const existing=(await serverDb.collection('submissions').doc(submissionId).get()).data();
+      const road=existing?.userId===decoded.uid&&existing.lat===lat&&existing.lng===lng?{streetName:existing.streetName,normalizedStreet:existing.normalizedStreet,formattedAddress:existing.formattedAddress,neighborhood:'',city:'Atlanta',state:'GA',postalCode:'',placeId:'',jurisdiction:existing.jurisdiction||'unknown',streetSource:existing.streetSource||'legacy'}:await confirmRoad(serverDb,decoded.uid,lat,lng,body.streetName,body.streetSource);
+      const txResult = await commitVerifiedSubmission(serverDb,{uid:decoded.uid,submissionId, mediaId, verificationId, requestedAction, targetPotholeId, lat, lng, actionType, coordinateSource, accuracyMeters, ...road, locationUserCorrected, notes, duplicateConfidence, candidatePotholeIds});
 
-        const mediaRef = serverDb.collection('mediaObjects').doc(mediaId);
-        const mediaSnap = await tx.get(mediaRef);
-        if (!mediaSnap.exists) {
-          throw new Error('Uploaded photo does not exist in /mediaObjects.');
-        }
-        if (mediaSnap.data()?.ownerId !== decoded.uid) {
-          throw new Error('Media object ownership mismatch.');
-        }
-
-        const userRef = serverDb.collection('users').doc(decoded.uid);
-        const userSnap = await tx.get(userRef);
-        if (!userSnap.exists) {
-          throw new Error('Contributor profile missing. Please sign out and sign back in.');
-        }
-        const userData = userSnap.data()!;
-        const username = String(userData.username || 'atlanta_user').slice(0, 32);
-        const displayName = String(userData.displayName || 'Contributor').slice(0, 64);
-
-        const photoUrl = `/api/media/${mediaId}`;
-
-        if (actionType === 'add_evidence') {
-          const targetRef = serverDb.collection('potholes').doc(targetPotholeId);
-          const targetSnap = await tx.get(targetRef);
-          if (!targetSnap.exists || targetSnap.data()?.status === 'rejected') {
-            throw new Error('Target canonical pothole record was not found.');
-          }
-
-          // Anti-farming guard: check recent evidence submissions by this user on the same pothole
-          const priorEvidenceSnap = await tx.get(
-            serverDb
-              .collection('submissions')
-              .where('userId', '==', decoded.uid)
-              .where('potholeId', '==', targetPotholeId)
-              .limit(5)
-          );
-          if (priorEvidenceSnap.size >= 2) {
-            throw new Error('Evidence limit reached: you can attach up to 2 evidence photos per pothole.');
-          }
-
-          tx.set(subRef, {
-            submissionId,
-            userId: decoded.uid,
-            username,
-            displayName,
-            potholeId: targetPotholeId,
-            candidatePotholeIds: [targetPotholeId],
-            actionType: 'add_evidence',
-            duplicateStatus: 'evidence_added',
-            duplicateConfidence,
-            mediaId,
-            photoUrl,
-            lat,
-            lng,
-            coordinateSource,
-            ...(accuracyMeters !== undefined ? { accuracyMeters } : {}),
-            formattedAddress,
-            streetName,
-            normalizedStreet,
-            locationUserCorrected,
-            ...(notes ? { notes } : {}),
-            aiClassificationStatus: aiStatus,
-            aiIsRoadDefect,
-            aiSeverityLabel,
-            ...(aiSummary ? { aiSummary } : {}),
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-
-          // Increment ONLY evidence counts — NEVER distinctPotholeCount!
-          tx.update(targetRef, {
-            evidenceCount: FieldValue.increment(1),
-            submissionCount: FieldValue.increment(1),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-
-          tx.update(userRef, {
-            evidenceCount: FieldValue.increment(1),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-
-          return {
-            idempotent: false,
-            submissionId,
-            potholeId: targetPotholeId,
-            duplicateStatus: 'evidence_added',
-            username,
-            displayName,
-          };
-        }
-
-        // Either 'new_pothole' or 'provisional_review'
-        const isProvisional = actionType === 'provisional_review';
-        const potholeId = `pot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const potholeRef = serverDb.collection('potholes').doc(potholeId);
-
-        tx.set(potholeRef, {
-          potholeId,
-          lat,
-          lng,
-          coordinateSource,
-          ...(accuracyMeters !== undefined ? { accuracyMeters } : {}),
-          formattedAddress,
-          streetName,
-          normalizedStreet,
-          ...(neighborhood ? { neighborhood } : {}),
-          city,
-          state,
-          ...(postalCode ? { postalCode } : {}),
-          ...(placeId ? { placeId } : {}),
-          jurisdiction,
-          locationUserCorrected,
-          status: isProvisional ? 'provisional' : 'accepted',
-          verificationStatus: isProvisional ? 'needs_review' : 'accepted',
-          severityLabel: aiSeverityLabel,
-          primaryContributorUid: decoded.uid,
-          primaryContributorUsername: username,
-          primaryContributorDisplayName: displayName,
-          primaryPhotoUrl: photoUrl,
-          primaryMediaId: mediaId,
-          evidenceCount: 1,
-          submissionCount: 1,
-          ...(aiSummary ? { aiReviewSummary: aiSummary } : {}),
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        tx.set(subRef, {
-          submissionId,
-          userId: decoded.uid,
-          username,
-          displayName,
-          potholeId,
-          candidatePotholeIds,
-          actionType,
-          duplicateStatus: isProvisional ? 'pending_review' : 'distinct',
-          duplicateConfidence,
-          mediaId,
-          photoUrl,
-          lat,
-          lng,
-          coordinateSource,
-          ...(accuracyMeters !== undefined ? { accuracyMeters } : {}),
-          formattedAddress,
-          streetName,
-          normalizedStreet,
-          locationUserCorrected,
-          ...(notes ? { notes } : {}),
-          aiClassificationStatus: aiStatus,
-          aiIsRoadDefect,
-          aiSeverityLabel,
-          ...(aiSummary ? { aiSummary } : {}),
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        // Provisional submissions awaiting duplicate review NEVER inflate distinctPotholeCount
-        if (!isProvisional) {
-          tx.update(userRef, {
-            distinctPotholeCount: FieldValue.increment(1),
-            evidenceCount: FieldValue.increment(1),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-        }
-
-        return {
-          idempotent: false,
-          submissionId,
-          potholeId,
-          duplicateStatus: isProvisional ? 'pending_review' : 'distinct',
-          username,
-          displayName,
-        };
-      });
-
-      let segmentResult: {
-        segmentId: string;
-        cycleNumber: number;
-        currentCycleDistinctCount: number;
-        reportId: string | null;
-        reportCreated: boolean;
-      } | null = null;
-
-      if (!txResult.idempotent && txResult.duplicateStatus !== 'pending_review') {
-        const isEvidence = txResult.duplicateStatus === 'evidence_added';
-        if (!isEvidence) {
-          segmentResult = await evaluateSegmentMembershipAndThreshold(
-            serverDb,
-            String(txResult.potholeId)
-          ).catch((err) => {
-            console.warn('Non-fatal segment evaluation failure:', err);
-            return null;
-          });
-        }
-        await recordContributionSocialImpact(serverDb, {
-          uid: decoded.uid,
-          username: String((txResult as { username?: string }).username || 'atlanta_user'),
-          displayName: String((txResult as { displayName?: string }).displayName || 'Contributor'),
-          potholeId: String(txResult.potholeId),
-          streetName,
-          neighborhood,
-          distinctDelta: isEvidence ? 0 : 1,
-          evidenceDelta: 1,
-          eventType: isEvidence ? 'evidence_added' : 'new_pothole',
-        }).catch((err) => {
-          console.warn('Non-fatal social impact update failure:', err);
-        });
-      }
-
+      const segmentResult=txResult.duplicateStatus==='pending_review'?null:await finishContribution(serverDb,submissionId).catch(()=>null);
       res.status(201).json({
         ok: true,
         idempotent: txResult.idempotent,
@@ -921,163 +617,31 @@ async function startServer() {
     }
   });
 
+  async function resolvePendingSubmission(serverDb:FirebaseFirestore.Firestore, decoded:DecodedIdToken, submissionId:string, resolution:'confirm_distinct'|'merge_evidence'|'reject', targetPotholeId:string, reason:string) {
+    const outcome=await commitPendingReview(serverDb,{uid:decoded.uid,email:String(decoded.email||'')},submissionId,resolution,targetPotholeId,reason);
+    if (['distinct','evidence_added'].includes(String(outcome.duplicateStatus))) await finishContribution(serverDb,submissionId).catch(()=>null);
+    return outcome;
+  }
+
   app.post('/api/submissions/:submissionId/resolve', async (req, res) => {
-    const decoded = await verifyBearerToken(req, res, true);
-    if (!decoded) return;
+    const adminCtx=await requireAdmin(req,res);if(!adminCtx)return;
+    const {submissionId}=req.params, resolution=req.body?.resolution;
+    const target=typeof req.body?.targetPotholeId==='string'?req.body.targetPotholeId:'';
+    if(!SAFE_ID_REGEX.test(submissionId)||!['confirm_distinct','merge_evidence','reject'].includes(resolution)||(resolution==='merge_evidence'&&!SAFE_ID_REGEX.test(target))) {res.status(400).json({error:'Invalid review request.'});return;}
+    try {const outcome=await resolvePendingSubmission(getServerFirestore()!,adminCtx.decoded,submissionId,resolution,target,typeof req.body?.reason==='string'?req.body.reason:'Administrator manual photo review');res.json({ok:true,...outcome});}
+    catch(err){res.status(400).json({error:err instanceof Error?err.message:'Unable to resolve submission.'});}
+  });
 
-    const { submissionId } = req.params;
-    if (!SAFE_ID_REGEX.test(submissionId)) {
-      res.status(400).json({ error: 'Invalid submissionId.' });
-      return;
-    }
-
-    const resolution = req.body?.resolution;
-    const targetPotholeId =
-      typeof req.body?.targetPotholeId === 'string' && SAFE_ID_REGEX.test(req.body.targetPotholeId)
-        ? req.body.targetPotholeId
-        : '';
-
-    if (resolution !== 'confirm_distinct' && resolution !== 'merge_evidence') {
-      res.status(400).json({ error: 'Resolution must be confirm_distinct or merge_evidence.' });
-      return;
-    }
-    if (resolution === 'merge_evidence' && !targetPotholeId) {
-      res.status(400).json({ error: 'targetPotholeId is required to merge as evidence.' });
-      return;
-    }
-
-    const serverDb = getServerFirestore();
-    if (!serverDb || !adminFirestoreReady) {
-      res.status(503).json({ error: 'Server Firestore database unavailable.' });
-      return;
-    }
-
-    try {
-      const adminDoc = await serverDb.collection('admins').doc(decoded.uid).get();
-      const isCallerAdmin = Boolean(decoded.admin || adminDoc.exists);
-
-      const outcome = await serverDb.runTransaction(async (tx) => {
-        const subRef = serverDb.collection('submissions').doc(submissionId);
-        const subSnap = await tx.get(subRef);
-        if (!subSnap.exists) throw new Error('Submission not found.');
-
-        const subData = subSnap.data()!;
-        if (subData.userId !== decoded.uid && !isCallerAdmin) {
-          throw new Error('You are not authorized to resolve this duplicate review.');
-        }
-        if (subData.duplicateStatus !== 'pending_review') {
-          return {
-            alreadyResolved: true,
-            duplicateStatus: subData.duplicateStatus,
-            potholeId: subData.potholeId,
-          };
-        }
-
-        const provisionalPotholeRef = serverDb.collection('potholes').doc(String(subData.potholeId));
-        const contributorRef = serverDb.collection('users').doc(String(subData.userId));
-
-        if (resolution === 'confirm_distinct') {
-          tx.update(provisionalPotholeRef, {
-            status: 'accepted',
-            verificationStatus: 'accepted',
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-          tx.update(subRef, {
-            duplicateStatus: 'distinct',
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-          tx.update(contributorRef, {
-            distinctPotholeCount: FieldValue.increment(1),
-            evidenceCount: FieldValue.increment(1),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-          return {
-            alreadyResolved: false,
-            duplicateStatus: 'distinct',
-            potholeId: subData.potholeId,
-            contributorUid: String(subData.userId),
-            username: String(subData.username || 'atlanta_user'),
-            displayName: String(subData.displayName || 'Contributor'),
-            streetName: String(subData.streetName || 'Atlanta Street'),
-          };
-        }
-
-        // merge_evidence
-        const targetRef = serverDb.collection('potholes').doc(targetPotholeId);
-        const targetSnap = await tx.get(targetRef);
-        if (!targetSnap.exists || targetSnap.data()?.status === 'rejected') {
-          throw new Error('Target pothole not found for evidence merge.');
-        }
-
-        tx.update(provisionalPotholeRef, {
-          status: 'rejected',
-          verificationStatus: 'rejected',
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-        tx.update(targetRef, {
-          evidenceCount: FieldValue.increment(1),
-          submissionCount: FieldValue.increment(1),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-        tx.update(subRef, {
-          potholeId: targetPotholeId,
-          duplicateStatus: 'evidence_added',
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-        tx.update(contributorRef, {
-          evidenceCount: FieldValue.increment(1),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        return {
-          alreadyResolved: false,
-          duplicateStatus: 'evidence_added',
-          potholeId: targetPotholeId,
-          contributorUid: String(subData.userId),
-          username: String(subData.username || 'atlanta_user'),
-          displayName: String(subData.displayName || 'Contributor'),
-          streetName: String(subData.streetName || 'Atlanta Street'),
-        };
-      });
-
-      if (!outcome.alreadyResolved) {
-        const isDistinct = outcome.duplicateStatus === 'distinct';
-        if (isDistinct) {
-          await evaluateSegmentMembershipAndThreshold(
-            serverDb,
-            String(outcome.potholeId)
-          ).catch((err) => {
-            console.warn('Non-fatal segment evaluation on resolve:', err);
-          });
-        }
-        const contribUid = String(
-          (outcome as { contributorUid?: string }).contributorUid || decoded.uid
-        );
-        await recordContributionSocialImpact(serverDb, {
-          uid: contribUid,
-          username: String((outcome as { username?: string }).username || 'atlanta_user'),
-          displayName: String((outcome as { displayName?: string }).displayName || 'Contributor'),
-          potholeId: String(outcome.potholeId),
-          streetName: String((outcome as { streetName?: string }).streetName || 'Atlanta Street'),
-          distinctDelta: isDistinct ? 1 : 0,
-          evidenceDelta: 1,
-          eventType: isDistinct ? 'new_pothole' : 'evidence_added',
-        }).catch((err) => {
-          console.warn('Non-fatal social impact resolution update failure:', err);
-        });
-      }
-
-      res.json({
-        ok: true,
-        alreadyResolved: outcome.alreadyResolved,
-        duplicateStatus: outcome.duplicateStatus,
-        potholeId: outcome.potholeId,
-      });
-    } catch (err) {
-      res.status(400).json({
-        error: err instanceof Error ? err.message : 'Unable to resolve submission.',
-      });
-    }
+  app.use('/api/community',createRateLimiter({scope:'community_read',maxRequests:60,windowMs:60_000}));
+  const communityCache=new Map<string,{until:number;items:unknown[]}>();
+  app.get('/api/community/:kind',async(req,res)=>{
+    const kind=req.params.kind;if(!['potholes','activity'].includes(kind)){res.sendStatus(404);return;}
+    const db=getServerFirestore();if(!db){res.sendStatus(503);return;}
+    try{let cached=communityCache.get(kind);if(!cached||cached.until<Date.now()){
+      const snap=kind==='potholes'?await db.collection('potholes').where('status','in',['accepted','reported','acknowledged','repaired']).limit(150).get():await db.collection('activityFeed').where('visibility','==','public').limit(40).get();
+      const sorted=snap.docs.slice().sort((a,b)=>(b.data().createdAt?.toMillis?.()||0)-(a.data().createdAt?.toMillis?.()||0));
+      const items=kind==='potholes'?sorted.filter(d=>d.data().verificationStatus==='accepted').map(d=>publicPothole(d.id,d.data())):sorted.map(d=>publicActivity(d.id,d.data()));cached={until:Date.now()+30000,items};communityCache.set(kind,cached);
+    }res.setHeader('Cache-Control','private, max-age=30');res.json({items:cached.items});}catch{res.status(503).json({error:'Community information unavailable.'});}
   });
 
   app.get('/api/potholes/:potholeId/submissions', async (req, res) => {
@@ -1094,6 +658,8 @@ async function startServer() {
     }
 
     try {
+      const parent=await serverDb.collection('potholes').doc(potholeId).get();
+      if(!parent.exists||!['accepted','reported','acknowledged','repaired'].includes(String(parent.data()?.status))){res.status(404).json({error:'Pothole not available.'});return;}
       const snap = await serverDb
         .collection('submissions')
         .where('potholeId', '==', potholeId)
@@ -1109,7 +675,7 @@ async function startServer() {
           return bMs - aMs;
         });
 
-      res.json({ items });
+      res.json({ items:items.map(s=>publicEvidence(String(s.submissionId||s.mediaId),s)) });
     } catch (err) {
       res.status(500).json({
         error: 'Unable to load pothole evidence records.',
@@ -1118,249 +684,27 @@ async function startServer() {
     }
   });
 
-  // --- Phase 4: per-user official ATL311 / GDOT case tracking ---
-  // Records a user's effort to get THEIR captured pothole fixed through an
-  // official channel. All writes go through the Admin SDK here (Firestore rules
-  // deny client writes). The official agency case number lives only in
-  // externalCaseRef and is set solely from a value the user manually confirms —
-  // never fabricated, never auto-advanced.
-  app.post('/api/cases/log', async (req, res) => {
-    const decoded = await verifyBearerToken(req, res, true);
-    if (!decoded) return;
-
-    const serverDb = getServerFirestore();
-    if (!serverDb || !adminFirestoreReady) {
-      res.status(503).json({ error: 'Server Firestore database unavailable.' });
-      return;
-    }
-
-    const body = req.body ?? {};
-    const potholeId = typeof body.potholeId === 'string' ? body.potholeId.trim() : '';
-    if (!SAFE_ID_REGEX.test(potholeId)) {
-      res.status(400).json({ error: 'Valid potholeId is required.' });
-      return;
-    }
-
-    const ALLOWED_CHANNELS = new Set(['atl311', 'gdot', 'email', 'other']);
-    const ALLOWED_METHODS = new Set(['official_portal', 'phone', 'email']);
-    const ALLOWED_CASE_STATUSES = new Set([
-      'drafted',
-      'submitted_unconfirmed',
-      'case_logged',
-      'acknowledged',
-      'resolved',
-      'reopened',
-    ]);
-
-    const channel = ALLOWED_CHANNELS.has(String(body.channel)) ? String(body.channel) : '';
-    const reportMethod = ALLOWED_METHODS.has(String(body.reportMethod))
-      ? String(body.reportMethod)
-      : '';
-    const externalCaseRef =
-      typeof body.externalCaseRef === 'string'
-        ? body.externalCaseRef.replace(/[^\w\s#/\-.]/g, '').trim().slice(0, 64)
-        : '';
-    const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 400) : '';
-    let requestedStatus = ALLOWED_CASE_STATUSES.has(String(body.status))
-      ? String(body.status)
-      : '';
-    // A confirmed external case number always implies at least "case_logged".
-    if (externalCaseRef && (!requestedStatus || requestedStatus === 'drafted' || requestedStatus === 'submitted_unconfirmed')) {
-      requestedStatus = 'case_logged';
-    }
-
-    try {
-      const potholeSnap = await serverDb.collection('potholes').doc(potholeId).get();
-      if (!potholeSnap.exists) {
-        res.status(404).json({ error: 'Pothole record not found.' });
-        return;
+  app.get('/api/media/:mediaId', async (req,res)=>{
+    const {mediaId}=req.params;
+    if(!SAFE_ID_REGEX.test(mediaId)){res.status(400).json({error:'Invalid media ID.'});return;}
+    const db=getServerFirestore();if(!db||!adminFirestoreReady){res.status(503).json({error:'Media service unavailable.'});return;}
+    try{
+      const media=(await db.collection('mediaObjects').doc(mediaId).get()).data();
+      if(!isReadableMedia(media)){res.status(404).json({error:'Media not found.'});return;}
+      let allowed=false;
+      if(req.headers.authorization){const decoded=await verifyBearerToken(req,res,false,true);if(!decoded)return;allowed=decoded.uid===media.ownerId||Boolean(adminApp&&await authorizeAdmin(getAdminAuth(adminApp),decoded));}
+      if(!allowed){
+        // Public only when referenced by an accepted canonical record, approved evidence, or the owner's own avatar.
+        const [pots,subs,owner]=await Promise.all([db.collection('potholes').where('primaryMediaId','==',mediaId).limit(10).get(),db.collection('submissions').where('mediaId','==',mediaId).limit(10).get(),db.collection('users').doc(media.ownerId).get()]);
+        const accepted=(d:FirebaseFirestore.DocumentData)=>['accepted','reported','acknowledged','repaired'].includes(String(d.status))&&d.verificationStatus==='accepted';
+        const owns=(uid:unknown)=>uid===media.ownerId;
+        allowed=pots.docs.some(d=>accepted(d.data())&&owns(d.data().primaryContributorUid))||(mediaId.startsWith('avt_')&&owner.data()?.photoURL===`/api/media/${mediaId}`);
+        if(!allowed){for(const sub of subs.docs){const v=sub.data();if(!['distinct','evidence_added'].includes(String(v.duplicateStatus))||!owns(v.userId))continue;const pot=await db.collection('potholes').doc(String(v.potholeId)).get();if(pot.exists&&accepted(pot.data()!)){allowed=true;break;}}}
       }
-      const pothole = potholeSnap.data()!;
-      if (pothole.primaryContributorUid !== decoded.uid) {
-        res.status(403).json({
-          error: 'You can only track official cases for potholes you reported.',
-        });
-        return;
-      }
-
-      const existingSnap = await serverDb
-        .collection('potholeCases')
-        .where('userId', '==', decoded.uid)
-        .where('potholeId', '==', potholeId)
-        .limit(1)
-        .get();
-
-      const nowMillis = Date.now();
-      const event = {
-        type: externalCaseRef
-          ? 'case_ref_logged'
-          : requestedStatus === 'submitted_unconfirmed'
-            ? 'marked_submitted'
-            : 'draft_saved',
-        ...(notes ? { note: notes } : {}),
-        ...(externalCaseRef ? { externalCaseRef } : {}),
-        atMillis: nowMillis,
-      };
-
-      if (existingSnap.empty) {
-        const caseId = `cas_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const status = requestedStatus || 'drafted';
-        const caseDoc: Record<string, unknown> = {
-          caseId,
-          userId: decoded.uid,
-          potholeId,
-          streetName: String(pothole.streetName || 'Unverified Street'),
-          formattedAddress: String(pothole.formattedAddress || ''),
-          lat: Number(pothole.lat),
-          lng: Number(pothole.lng),
-          jurisdiction: String(pothole.jurisdiction || 'unknown'),
-          channel: channel || (pothole.jurisdiction === 'gdot' ? 'gdot' : 'atl311'),
-          ...(reportMethod ? { reportMethod } : {}),
-          status,
-          ...(externalCaseRef ? { externalCaseRef } : {}),
-          ...(pothole.primaryPhotoUrl ? { primaryPhotoUrl: String(pothole.primaryPhotoUrl) } : {}),
-          ...(pothole.primaryMediaId ? { primaryMediaId: String(pothole.primaryMediaId) } : {}),
-          ...(notes ? { notes } : {}),
-          events: [event],
-          ...(status === 'submitted_unconfirmed' || status === 'case_logged'
-            ? { submittedAt: FieldValue.serverTimestamp() }
-            : {}),
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        };
-        await serverDb.collection('potholeCases').doc(caseId).set(caseDoc);
-        res.status(201).json({ ok: true, caseId });
-        return;
-      }
-
-      const existingDoc = existingSnap.docs[0];
-      const existing = existingDoc.data();
-      const prevStatus = String(existing.status || 'drafted');
-      // Never regress a case to an earlier stage via a stray request.
-      const STAGE: Record<string, number> = {
-        drafted: 0,
-        submitted_unconfirmed: 1,
-        case_logged: 2,
-        acknowledged: 3,
-        resolved: 4,
-        reopened: 1,
-      };
-      const nextStatus =
-        requestedStatus && STAGE[requestedStatus] >= STAGE[prevStatus] ? requestedStatus : prevStatus;
-
-      const update: Record<string, unknown> = {
-        status: nextStatus,
-        events: FieldValue.arrayUnion(event),
-        updatedAt: FieldValue.serverTimestamp(),
-        ...(channel ? { channel } : {}),
-        ...(reportMethod ? { reportMethod } : {}),
-        ...(externalCaseRef ? { externalCaseRef } : {}),
-        ...(notes ? { notes } : {}),
-      };
-      if (
-        !existing.submittedAt &&
-        (nextStatus === 'submitted_unconfirmed' || nextStatus === 'case_logged')
-      ) {
-        update.submittedAt = FieldValue.serverTimestamp();
-      }
-      await existingDoc.ref.update(update);
-      res.json({ ok: true, caseId: String(existing.caseId || existingDoc.id) });
-    } catch (err) {
-      res.status(500).json({
-        error: 'Unable to log official case.',
-        detail: err instanceof Error ? err.message : 'Case write failed',
-      });
-    }
-  });
-
-  app.get('/api/cases/mine', async (req, res) => {
-    const decoded = await verifyBearerToken(req, res, false);
-    if (!decoded) return;
-
-    const serverDb = getServerFirestore();
-    if (!serverDb || !adminFirestoreReady) {
-      res.status(503).json({ error: 'Server Firestore database unavailable.' });
-      return;
-    }
-
-    try {
-      const snap = await serverDb
-        .collection('potholeCases')
-        .where('userId', '==', decoded.uid)
-        .limit(100)
-        .get();
-
-      const cases = snap.docs.map((d) => d.data());
-
-      // Enrich with the live pothole status so "My Cases" reflects reality
-      // (e.g. an admin-confirmed repair) without duplicating it onto the case.
-      const potholeIds = Array.from(
-        new Set(cases.map((c) => String(c.potholeId)).filter(Boolean))
-      );
-      const statusByPothole = new Map<string, string>();
-      if (potholeIds.length > 0) {
-        const refs = potholeIds.map((id) => serverDb.collection('potholes').doc(id));
-        const potholeSnaps = await serverDb.getAll(...refs);
-        for (const ps of potholeSnaps) {
-          if (ps.exists) statusByPothole.set(ps.id, String(ps.data()?.status || ''));
-        }
-      }
-
-      const enriched = cases
-        .map((c): Record<string, unknown> => ({
-          ...c,
-          potholeStatus: statusByPothole.get(String(c.potholeId)) || undefined,
-        }))
-        .sort((a, b) => {
-          const aMs = (a.updatedAt as Timestamp | undefined)?.toMillis?.() ?? 0;
-          const bMs = (b.updatedAt as Timestamp | undefined)?.toMillis?.() ?? 0;
-          return bMs - aMs;
-        });
-
-      res.json({ cases: enriched });
-    } catch (err) {
-      res.status(500).json({
-        error: 'Unable to load your cases.',
-        detail: err instanceof Error ? err.message : 'Case query failed',
-      });
-    }
-  });
-
-  app.get('/api/media/:mediaId', async (req, res) => {
-    const { mediaId } = req.params;
-    if (!SAFE_ID_REGEX.test(mediaId)) {
-      res.status(400).json({ error: 'Invalid media ID format' });
-      return;
-    }
-
-    try {
-      let media: MediaPayload | null = null;
-      if (adminFirestoreReady) {
-        try {
-          media = await fetchMediaViaAdminSdk(mediaId);
-        } catch {
-          media = await fetchMediaViaFirestoreRest(mediaId);
-        }
-      } else {
-        media = await fetchMediaViaFirestoreRest(mediaId);
-      }
-
-      if (!media) {
-        res.status(404).json({ error: 'Media object not found' });
-        return;
-      }
-
-      res.setHeader('Content-Type', media.contentType);
-      res.setHeader('Content-Length', String(media.buffer.length));
-      res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.status(200).send(media.buffer);
-    } catch (err) {
-      res.status(502).json({
-        error: 'Unable to stream media object',
-        detail: err instanceof Error ? err.message : 'Unexpected server error',
-      });
-    }
+      if(!allowed){res.status(404).json({error:'Media not found.'});return;}
+      const prepared=await loadMediaBytes(mediaId,media,req.query.variant==='thumb'?'thumb':'evidence');
+      res.setHeader('Content-Type',prepared.contentType);res.setHeader('Content-Length',String(prepared.buffer.length));res.setHeader('Cache-Control',req.headers.authorization?'private, no-store':'private, max-age=120');res.setHeader('Vary','Authorization');res.setHeader('X-Content-Type-Options','nosniff');res.status(200).send(prepared.buffer);
+    }catch{res.status(404).json({error:'Media not available.'});}
   });
 
   // Phase 3 Social, Friends, Leaderboards, Achievements & Notifications Routes
@@ -1375,6 +719,8 @@ async function startServer() {
     }
 
     try {
+      // Contribution counters are maintained by acceptance transactions; do not reset them from a capped query.
+      await syncUserPotholeContributorIdentity(serverDb, decoded.uid);
       await syncUserLeaderboardProfile(serverDb, decoded.uid);
       await evaluateUserAchievements(serverDb, decoded.uid, false);
       res.json({ ok: true });
@@ -1390,8 +736,11 @@ async function startServer() {
     const decoded = await verifyBearerToken(req, res, false);
     if (!decoded) return;
 
-    const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
-    if (rawQuery.length < 2) {
+    const normalizeName = (value: string) => value.toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/^@/, '');
+    const rawQuery = normalizeName(typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 64) : '');
+    const recommendations = req.query.recommendations === 'true';
+    if (!rawQuery && !recommendations) {
       res.json({ users: [] });
       return;
     }
@@ -1404,7 +753,9 @@ async function startServer() {
 
     try {
       const [usersSnap, friendshipsSnap] = await Promise.all([
-        serverDb.collection('users').limit(120).get(),
+        serverDb.collection('users')
+          .select('uid', 'username', 'displayName', 'photoURL', 'bio',
+            'distinctPotholeCount', 'evidenceCount', 'shareNeighborhood', 'homeNeighborhood').get(),
         serverDb
           .collection('friendships')
           .where('participantUids', 'array-contains', decoded.uid)
@@ -1424,14 +775,27 @@ async function startServer() {
         });
       }
 
-      const matches = usersSnap.docs
-        .map((d) => d.data())
+      const scoreName = (value: string) => {
+        const name = normalizeName(value);
+        if (name === rawQuery) return 4;
+        if (name.startsWith(rawQuery)) return 3;
+        if (name.includes(rawQuery)) return 2;
+        let index = 0;
+        for (const char of name) if (char === rawQuery[index]) index++;
+        return index === rawQuery.length ? 1 : 0;
+      };
+      const candidates = usersSnap.docs
+        .map((d) => ({ ...d.data(), uid: d.id }) as FirebaseFirestore.DocumentData & { uid: string })
         .filter((u) => {
           if (u.uid === decoded.uid) return false;
-          const uname = String(u.username || '').toLowerCase();
-          const dname = String(u.displayName || '').toLowerCase();
-          return uname.includes(rawQuery) || dname.includes(rawQuery);
+          if (recommendations) return !relationMap.has(u.uid);
+          return scoreName(String(u.username || '')) > 0 || scoreName(String(u.displayName || '')) > 0;
         })
+        .map((u) => ({ ...u, rank: recommendations ? Math.random() :
+          Math.max(scoreName(String(u.username || '')), scoreName(String(u.displayName || ''))) }) as
+          FirebaseFirestore.DocumentData & { uid: string; rank: number })
+        .sort((a, b) => b.rank - a.rank);
+      const matches = candidates
         .slice(0, 12)
         .map((u) => {
           const rel = relationMap.get(String(u.uid));
@@ -1440,6 +804,7 @@ async function startServer() {
             username: String(u.username || ''),
             displayName: String(u.displayName || ''),
             photoURL: typeof u.photoURL === 'string' ? u.photoURL : undefined,
+            bio: typeof u.bio === 'string' ? u.bio.slice(0, 160) : '',
             distinctPotholeCount: Number(u.distinctPotholeCount || 0),
             evidenceCount: Number(u.evidenceCount || 0),
             homeNeighborhood:
@@ -1459,7 +824,7 @@ async function startServer() {
       res.json({ users: matches });
     } catch (err) {
       res.status(500).json({
-        error: 'Unable to search contributors.',
+        error: 'Unable to search Patchers.',
         detail: err instanceof Error ? err.message : 'Query error',
       });
     }
@@ -1515,7 +880,7 @@ async function startServer() {
           direction: isRequester ? 'outgoing' : 'incoming',
           otherUid,
           username: String(profile?.username || 'atlanta_user'),
-          displayName: String(profile?.displayName || 'Contributor'),
+          displayName: String(profile?.displayName || 'Patcher'),
           photoURL: typeof profile?.photoURL === 'string' ? profile.photoURL : undefined,
           distinctPotholeCount: Number(profile?.distinctPotholeCount || 0),
           evidenceCount: Number(profile?.evidenceCount || 0),
@@ -1541,7 +906,7 @@ async function startServer() {
 
     const targetUid = typeof req.body?.targetUid === 'string' ? req.body.targetUid.trim() : '';
     if (!SAFE_ID_REGEX.test(targetUid) || targetUid === decoded.uid) {
-      res.status(400).json({ error: 'Valid target contributor UID is required.' });
+      res.status(400).json({ error: 'Valid target Patcher UID is required.' });
       return;
     }
 
@@ -1561,7 +926,7 @@ async function startServer() {
         ]);
 
         if (!senderSnap.exists || !targetSnap.exists) {
-          throw new Error('Contributor profile not found.');
+          throw new Error('Patcher profile not found.');
         }
 
         if (friendshipSnap.exists) {
@@ -1898,66 +1263,47 @@ async function startServer() {
     }
   });
 
-  // Phase 4 Civic Segmentation, 5-Pothole Report Engine & Admin Oversight Routes
+  // Phase 4 Community Segmentation, 5-Pothole Report Engine & Admin Oversight Routes
   app.post('/api/admin/bootstrap', async (req, res) => {
-    const decoded = await verifyBearerToken(req, res, true);
+    res.setHeader('Cache-Control', 'private, no-store');
+    const decoded = await verifyBearerToken(req, res, true, true);
     if (!decoded) return;
-
-    const email = String(decoded.email || '').trim().toLowerCase();
-    const allowlisted = getAllowedAdminEmails();
-    if (!email || !allowlisted.has(email)) {
-      res.status(403).json({
-        ok: false,
-        admin: false,
-        error: 'Account email is not allowlisted for PatchUp admin bootstrap.',
-      });
-      return;
-    }
-
     const serverDb = getServerFirestore();
     if (!serverDb || !adminFirestoreReady || !adminApp) {
       res.status(503).json({ error: 'Server Firebase Admin SDK unavailable.' });
       return;
     }
-
     try {
-      const existingAdminSnap = await serverDb.collection('admins').doc(decoded.uid).get();
-      if (!decoded.admin) {
-        await getAdminAuth(adminApp).setCustomUserClaims(decoded.uid, {
-          ...(decoded.admin ? {} : {}),
-          admin: true,
-        });
+      const auth = getAdminAuth(adminApp);
+      if (!await authorizeAdmin(auth, decoded)) {
+        // A legacy claim-only account is cleaned up when it returns. Current
+        // authorization remains denied even if cleanup fails.
+        await revokeLegacyAdmin(auth, serverDb, decoded.uid);
+        res.status(403).json({ ok: false, admin: false, error: 'Admin privileges required.' });
+        return;
       }
-      if (!existingAdminSnap.exists) {
-        await serverDb.collection('admins').doc(decoded.uid).set({
-          uid: decoded.uid,
-          email,
-          grantedAt: FieldValue.serverTimestamp(),
-        });
-        await writeAdminAudit(serverDb, {
-          actor: { uid: decoded.uid, email },
-          action: 'admin_bootstrap',
-          targetType: 'admin',
-          targetId: decoded.uid,
-          reason: 'Verified owner allowlist bootstrap',
-          afterSummary: `admin=true for ${email}`,
-        });
-      }
-
-      res.json({
-        ok: true,
-        admin: true,
-        claimUpdated: !decoded.admin,
+      const email = normalizeEmail(decoded.email);
+      const ref = serverDb.collection('admins').doc(decoded.uid);
+      const enrolled = await serverDb.runTransaction(async tx => {
+        const existing = await tx.get(ref);
+        if (existing.exists && existing.data()?.email === email) return false;
+        tx.set(ref, { uid: decoded.uid, email, grantedAt: FieldValue.serverTimestamp() });
+        return true;
       });
-    } catch (err) {
-      res.status(500).json({
-        error: 'Unable to bootstrap admin claim.',
-        detail: err instanceof Error ? err.message : 'Admin error',
+      if (enrolled) await writeAdminAudit(serverDb, {
+        actor: { uid: decoded.uid, email }, action: 'admin_bootstrap', targetType: 'admin',
+        targetId: decoded.uid, reason: 'Verified server allowlist enrollment', afterSummary: 'Administrator enrolled',
       });
+      // No new privileged custom claim is necessary; every admin operation uses
+      // the server allowlist and current Auth account instead.
+      res.json({ ok: true, admin: true, claimUpdated: false });
+    } catch {
+      res.status(503).json({ error: 'Unable to verify administrator access.' });
     }
   });
 
-  app.get('/api/segments', async (_req, res) => {
+  app.get('/api/segments', async (req, res) => {
+    if(!await requireAdmin(req,res))return;
     const serverDb = getServerFirestore();
     if (!serverDb || !adminFirestoreReady) {
       res.status(503).json({ error: 'Server Firestore database unavailable.' });
@@ -1989,7 +1335,8 @@ async function startServer() {
     }
   });
 
-  app.get('/api/reports', async (_req, res) => {
+  app.get('/api/reports', async (req, res) => {
+    if(!await requireAdmin(req,res))return;
     const serverDb = getServerFirestore();
     if (!serverDb || !adminFirestoreReady) {
       res.status(503).json({ error: 'Server Firestore database unavailable.' });
@@ -2009,10 +1356,68 @@ async function startServer() {
       res.json({ reports });
     } catch (err) {
       res.status(500).json({
-        error: 'Unable to load civic reports.',
+        error: 'Unable to load community reports.',
         detail: err instanceof Error ? err.message : 'Query error',
       });
     }
+  });
+
+  // Admin-only, read-only views over persistent submission and report records.
+  app.get('/api/admin/hub/:section', async (req,res) => {
+    if (!await requireAdmin(req,res)) return;
+    res.set('Cache-Control','private, no-store');
+    const db = getServerFirestore()!;
+    const section = req.params.section;
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
+    if (cursor && !SAFE_ID_REGEX.test(cursor)) {res.status(400).json({error:'Invalid cursor.'});return;}
+    try {
+      let query: FirebaseFirestore.Query;
+      if (section === 'reviews') query = db.collection('submissions').where('duplicateStatus','==','pending_review');
+      else if (section === 'drafts') query = db.collection('reports').where('status','in',['awaiting_admin_review','ready_for_submission','unable_to_submit']);
+      else if (section === 'sent') query = db.collection('reports').where('status','in',['submitted','acknowledged','resolved']);
+      else if (section === 'repairs') query = db.collection('potholes').where('status','in',['accepted','reported','acknowledged']);
+      else if (section === 'history') {
+        const recent = await db.collection('adminAudit').orderBy('createdAt','desc').limit(30).get();
+        res.json({items:recent.docs.map(doc=>{const d=doc.data();return {id:doc.id,action:d.action,reason:d.reason,afterSummary:d.afterSummary,createdAt:d.createdAt?.toMillis?.()??null};}),nextCursor:null});return;
+      }
+      else {res.status(404).json({error:'Unknown section.'});return;}
+      query = query.orderBy('__name__');
+      if (cursor) query = query.startAfter(cursor);
+      const snapshot = await query.limit(26).get();
+      const docs = snapshot.docs.slice(0,25);
+      const items = docs.map(doc => { const d=doc.data(); return section === 'reviews' ? {
+        id:doc.id, streetName:d.streetName, formattedAddress:d.formattedAddress, mediaId:d.mediaId, lat:d.lat,lng:d.lng, aiSummary:d.aiSummary, targetPotholeId:d.reviewTargetPotholeId || '', candidatePotholeIds:Array.isArray(d.candidatePotholeIds)?d.candidatePotholeIds:[]
+      } : section === 'repairs' ? {
+        id:doc.id, streetName:d.streetName, formattedAddress:d.formattedAddress, mediaId:d.primaryMediaId, lat:d.lat, lng:d.lng, status:d.status
+      } : {id:doc.id,streetName:d.streetName,status:d.status,jurisdiction:d.jurisdiction,distinctPotholeCount:d.distinctPotholeCount,externalReference:d.externalReference,submissionChannel:d.submissionChannel}; });
+      res.json({items,nextCursor:snapshot.size>25?docs[docs.length-1].id:null});
+    } catch {res.status(500).json({error:'Unable to load admin queue.'});}
+  });
+  app.get('/api/admin/email-drafts/:reportId', async (req,res) => {
+    if (!await requireAdmin(req,res)) return;
+    res.set('Cache-Control','private, no-store');
+    const db=getServerFirestore()!, id=req.params.reportId;
+    if (!SAFE_ID_REGEX.test(id)) {res.status(400).json({error:'Invalid report ID.'});return;}
+    try {
+      const snap=await db.collection('reports').doc(id).get();
+      const report=snap.data();
+      if (!report || !['awaiting_admin_review','ready_for_submission','unable_to_submit'].includes(report.status)) {res.status(404).json({error:'Draft no longer pending.'});return;}
+      const ids=Array.isArray(report.snapshotPotholeIds)?[...new Set<string>(report.snapshotPotholeIds.filter((id:unknown)=>typeof id==='string'&&SAFE_ID_REGEX.test(id)))].slice(0,5):[];
+      const photos=ids.length?await db.getAll(...ids.map(id=>db.collection('potholes').doc(id))):[];
+      const draft=buildReportDraft(report,photos.filter(p=>p.exists).map(p=>({...p.data(),potholeId:p.id})),(process.env.PATCHUP_REPORT_FROM_EMAIL||'').trim());
+      const media=draft.attachments.length?await db.getAll(...draft.attachments.map(a=>db.collection('mediaObjects').doc(a.mediaId))):[];
+      const attachments=[];
+      for(const [i,a] of draft.attachments.entries()){
+        const m=media[i]?.data(); const p=photos.find(p=>p.id===a.potholeId)?.data(); const type=String(m?.contentType||'');
+        let valid=false;
+        try {if(isReadableMedia(m)&&m.ownerId===p?.primaryContributorUid){await loadMediaBytes(a.mediaId,m);valid=true;}}catch{/* missing or malformed photo */}
+        if(!valid) draft.warnings.push(`Pothole ${a.number}: image unavailable.`);
+        const ext='jpg';
+        if(m?.privacyVersion!==PHOTO_PRIVACY_VERSION)draft.warnings.push(`Pothole ${a.number}: older photo; review visible personal details before sharing.`);
+        attachments.push({...a,filename:`pothole-${a.number}.${ext}`,url:valid?`/api/media/${a.mediaId}`:null});
+      }
+      res.json({...draft,attachments,reportId:id,status:report.status});
+    } catch {res.status(500).json({error:'Unable to generate email draft.'});}
   });
 
   app.get('/api/admin/overview', async (req, res) => {
@@ -2055,7 +1460,7 @@ async function startServer() {
       });
     } catch (err) {
       res.status(500).json({
-        error: 'Unable to load admin civic oversight overview.',
+        error: 'Unable to load admin community oversight overview.',
         detail: err instanceof Error ? err.message : 'Query error',
       });
     }
@@ -2109,7 +1514,19 @@ async function startServer() {
         : 'Admin pothole verification update';
 
     try {
-      const outcome = await adminReviewPothole(getServerFirestore()!, {
+      const reviewDb=getServerFirestore()!;
+      const pot=await reviewDb.collection('potholes').doc(potholeId).get();
+      if(pot.data()?.status==='provisional' && status && status!=='provisional') {
+        if(status!=='accepted'&&status!=='rejected') throw new Error('Accept or reject the pending photo before changing repair status.');
+        const subs=await reviewDb.collection('submissions').where('potholeId','==',potholeId).get();
+        const pending=subs.docs.filter(d=>d.data().duplicateStatus==='pending_review');
+        if(pending.length!==1) throw new Error('Expected one pending submission. Inspect the review records.');
+        const target=String(pending[0].data().reviewTargetPotholeId||'');
+        const decision=status==='rejected'?'reject':target?'merge_evidence':'confirm_distinct';
+        const review=await resolvePendingSubmission(reviewDb,adminCtx.decoded,pending[0].id,decision,target,reason);
+        res.json({ok:true,potholeId:review.potholeId,status:review.duplicateStatus==='rejected'?'rejected':'accepted',duplicateStatus:review.duplicateStatus});return;
+      }
+      const outcome = await adminReviewPothole(reviewDb, {
         potholeId,
         status,
         severityLabel,
@@ -2125,6 +1542,13 @@ async function startServer() {
         error: err instanceof Error ? err.message : 'Unable to review pothole.',
       });
     }
+  });
+
+  app.post('/api/admin/contributions/reconcile',async(req,res)=>{
+    if(!await requireAdmin(req,res))return;
+    const db=getServerFirestore()!;const snap=await db.collection('contributionEffects').where('status','==','pending').limit(25).get();
+    let completed=0,failed=0;for(const d of snap.docs){try{await finishContribution(db,d.id);completed++;}catch{failed++;}}
+    res.json({ok:true,processed:snap.size,completed,failed});
   });
 
   app.post('/api/admin/segments/reassign', async (req, res) => {
@@ -2318,7 +1742,7 @@ async function startServer() {
       const reportRef = serverDb.collection('reports').doc(reportId);
       const snap = await reportRef.get();
       if (!snap.exists) {
-        res.status(404).json({ error: 'Civic report not found.' });
+        res.status(404).json({ error: 'Community report not found.' });
         return;
       }
       await reportRef.update({
@@ -2341,7 +1765,7 @@ async function startServer() {
     }
   });
 
-  // Phase 5 Entertainment Minigame Routes (strictly isolated from civic metrics)
+  // Phase 5 Entertainment Minigame Routes (strictly isolated from community metrics)
   app.get('/api/games/stats', async (req, res) => {
     const decoded = await verifyBearerToken(req, res, false);
     if (!decoded) return;
@@ -2372,7 +1796,7 @@ async function startServer() {
       score: req.body?.score,
       durationMs: req.body?.durationMs,
     });
-    if (!validation.ok) {
+    if (validation.ok === false) {
       res.status(400).json({ error: validation.error });
       return;
     }
@@ -2471,6 +1895,7 @@ async function startServer() {
     }
   );
 
+  if(process.env.PATCHUP_MEDIA_MAINTENANCE_ENABLED==='true'){let running=false;const tick=async()=>{if(running)return;const db=getServerFirestore();if(!db)return;running=true;try{await runMediaMaintenance(db);}catch{/* retry next run */}finally{running=false;}};setInterval(()=>void tick(),60*60*1000).unref();void tick();}
   app.listen(port, '0.0.0.0', () => {
     console.log(
       `PatchUp server running on http://0.0.0.0:${port} (mode: ${isProd ? 'production' : 'development'})`

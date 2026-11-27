@@ -37,6 +37,7 @@ export interface PotholeRecord {
   primaryContributorUid: string;
   primaryContributorUsername: string;
   primaryContributorDisplayName: string;
+  primaryContributorPhotoURL?: string;
   primaryPhotoUrl: string;
   primaryMediaId: string;
   evidenceCount: number;
@@ -144,63 +145,6 @@ export interface PotholeSubmission {
   updatedAt?: Timestamp;
 }
 
-export type CaseStatus =
-  | 'drafted'
-  | 'submitted_unconfirmed'
-  | 'case_logged'
-  | 'acknowledged'
-  | 'resolved'
-  | 'reopened';
-
-export type ReportChannel = 'atl311' | 'gdot' | 'email' | 'other';
-export type ReportMethod = 'official_portal' | 'phone' | 'email';
-
-export interface CaseEvent {
-  type: string;
-  note?: string;
-  externalCaseRef?: string;
-  atMillis: number;
-}
-
-/**
- * A per-user record of their effort to get one pothole fixed through an
- * official channel. Kept strictly distinct from the PatchUp pothole ID: the
- * official agency case number lives in `externalCaseRef` and is only ever set
- * from a value the user manually confirms — never fabricated or auto-advanced.
- */
-export interface PotholeCaseRecord {
-  caseId: string;
-  userId: string;
-  potholeId: string;
-  streetName: string;
-  formattedAddress: string;
-  lat: number;
-  lng: number;
-  jurisdiction: 'atldot' | 'gdot' | 'unknown';
-  channel: ReportChannel;
-  reportMethod?: ReportMethod;
-  status: CaseStatus;
-  externalCaseRef?: string;
-  primaryPhotoUrl?: string;
-  primaryMediaId?: string;
-  notes?: string;
-  events: CaseEvent[];
-  submittedAt?: Timestamp;
-  createdAt?: Timestamp;
-  updatedAt?: Timestamp;
-  // Enriched on read from the live pothole doc (not stored on the case):
-  potholeStatus?: PotholeStatus;
-}
-
-export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
-  drafted: 'Report Drafted',
-  submitted_unconfirmed: 'Submitted (Unconfirmed)',
-  case_logged: 'Official Case Logged',
-  acknowledged: 'Acknowledged by Agency',
-  resolved: 'Resolved',
-  reopened: 'Reopened',
-};
-
 export interface DuplicateCandidateSummary {
   potholeId: string;
   lat: number;
@@ -225,8 +169,8 @@ export interface MapsClientConfig {
 }
 
 export const COORDINATE_SOURCE_LABELS: Record<CoordinateSource, string> = {
-  gps_verified: 'GPS Verified',
-  exif_extracted: 'EXIF Photo GPS',
+  gps_verified: 'Device GPS estimate',
+  exif_extracted: 'GPS from photograph',
   manual_pin: 'Manual Pin',
 };
 

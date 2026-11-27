@@ -1,11 +1,14 @@
+import { ProtectedImage } from '../components/ProtectedImage';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
+  Award,
   Bell,
   Camera,
   Check,
   CheckCircle2,
+  Flame,
   Info,
   MapPin,
   Users,
@@ -14,7 +17,6 @@ import { useAuth } from '../context/AuthContext';
 import { useCommunityPotholes, useMySubmissions } from '../hooks/usePotholes';
 import { useActivityFeed, useFriends, useNotifications } from '../hooks/useSocial';
 import {
-  COORDINATE_SOURCE_LABELS,
   loadMapsClientConfig,
   MapsClientConfig,
   POTHOLE_STATUS_LABELS,
@@ -22,6 +24,7 @@ import {
 } from '../lib/maps';
 import { NavTab } from '../components/AppShell';
 import { AtlantaMap } from '../components/AtlantaMap';
+import { AchievementBadge } from '../components/AchievementBadge';
 
 interface HomeViewProps {
   onNavigate: (tab: NavTab) => void;
@@ -40,8 +43,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const { events: feedEvents, loading: loadingFeed } = useActivityFeed();
 
   const [feedScope, setFeedScope] = useState<'all' | 'friends'>('all');
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
-  const [resolveMessage, setResolveMessage] = useState<string | null>(null);
   const [mapsConfig, setMapsConfig] = useState<MapsClientConfig>({
     configured: false,
     apiKey: '',
@@ -52,61 +53,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
     loadMapsClientConfig().then(setMapsConfig);
   }, []);
 
-  const pendingReviews = submissions.filter(
-    (s) => s.duplicateStatus === 'pending_review' && s.aiIsRoadDefect !== false
-  );
-  const classifierAppeals = submissions.filter(
-    (s) => s.duplicateStatus === 'pending_review' && s.aiIsRoadDefect === false
-  );
+  const classifierAppeals = submissions.filter(s=>s.duplicateStatus==='pending_review');
   const gallerySubmissions = submissions.filter(
     (s) => s.duplicateStatus !== 'pending_review' && s.duplicateStatus !== 'rejected'
   );
+  const communityGalleryPotholes = potholes.filter((pothole) => pothole.status !== 'provisional');
+  const today = new Date();
+  const todayKey = today.toISOString().slice(0, 10);
+  today.setUTCDate(today.getUTCDate() - 1);
+  const yesterdayKey = today.toISOString().slice(0, 10);
+  const dailyStreak =
+    publicProfile?.lastCollectedDate === todayKey ||
+    publicProfile?.lastCollectedDate === yesterdayKey
+      ? publicProfile.dailyStreak
+      : 0;
 
-  const friendUidSet = useMemo(
-    () => new Set(acceptedFriends.map((f) => f.otherUid)),
-    [acceptedFriends]
-  );
-
-  const visibleFeedEvents = useMemo(() => {
-    if (feedScope === 'friends' && user) {
-      return feedEvents.filter((ev) => friendUidSet.has(ev.actorUid) || ev.actorUid === user.uid);
-    }
-    return feedEvents;
-  }, [feedEvents, feedScope, friendUidSet, user]);
-
-  const handleResolvePending = async (
-    submissionId: string,
-    resolution: 'confirm_distinct' | 'merge_evidence',
-    targetPotholeId?: string
-  ) => {
-    if (!user) return;
-    setResolvingId(submissionId);
-    setResolveMessage(null);
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/submissions/${encodeURIComponent(submissionId)}/resolve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ resolution, targetPotholeId }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Unable to resolve duplicate review.');
-      }
-      setResolveMessage(
-        data.duplicateStatus === 'distinct'
-          ? 'Confirmed as distinct pothole and credited to your profile.'
-          : 'Linked as supporting evidence on existing pothole.'
-      );
-    } catch (err) {
-      setResolveMessage(err instanceof Error ? err.message : 'Unable to resolve review.');
-    } finally {
-      setResolvingId(null);
-    }
-  };
+  const visibleFeedEvents=feedEvents;
 
   return (
     <div className="city-page city-home editorial-home signed-in-home space-y-6">
@@ -123,18 +85,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <span>Take a pothole photo</span>
             <ArrowRight className="w-5 h-5" />
           </button>
-          <span className="home-command-note">No forms after your photo · Location runs automatically</span>
         </div>
         <div className="home-live-map">
           <div className="home-map-label">
             <span>LIVE ATLANTA STREET MAP</span>
-            <div className="home-map-actions">
-              <strong>{loading ? '—' : potholes.length} reports</strong>
-              <button type="button" onClick={() => onNavigate('map')}>
-                <MapPin className="w-4 h-4" />
-                <span>Open full map</span>
-              </button>
-            </div>
+            <strong>{loading ? '—' : potholes.length} reports</strong>
           </div>
           <AtlantaMap
             mapsConfig={mapsConfig}
@@ -158,23 +113,39 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
-            <div className="rounded-xl bg-[#F7F7F8] p-3.5 border border-[#E8DFC5]/70">
-              <div className="text-xs text-[#6E6978]">Distinct Spots</div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[#2D2B35] tabular-nums">
-                {publicProfile?.distinctPotholeCount ?? 0}
+          <div className="personal-kpi-grid">
+            <div className="personal-kpi-card">
+              <span className="personal-kpi-icon personal-kpi-icon-capture">
+                <Camera aria-hidden="true" />
+              </span>
+              <div>
+                <div className="personal-kpi-label">Potholes Collected</div>
+                <div className="personal-kpi-value tabular-nums">
+                  {publicProfile?.potholesCollectedCount ?? gallerySubmissions.length}
+                </div>
               </div>
             </div>
-            <div className="rounded-xl bg-[#F7F7F8] p-3.5 border border-[#E8DFC5]/70">
-              <div className="text-xs text-[#6E6978]">Evidence</div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[#2D2B35] tabular-nums">
-                {publicProfile?.evidenceCount ?? 0}
+            <div className="personal-kpi-card">
+              <span className="personal-kpi-icon personal-kpi-icon-badge">
+                <Award aria-hidden="true" />
+              </span>
+              <div>
+                <div className="personal-kpi-label">Badges Earned</div>
+                <div className="personal-kpi-value tabular-nums">
+                  {publicProfile?.unlockedBadgesCount ?? 0}
+                </div>
               </div>
             </div>
-            <div className="rounded-xl bg-[#F7F7F8] p-3.5 border border-[#E8DFC5]/70">
-              <div className="text-xs text-[#6E6978]">Badges</div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[#4CB729] tabular-nums">
-                {publicProfile?.unlockedBadgesCount ?? 0}
+            <div className="personal-kpi-card">
+              <span className="personal-kpi-icon personal-kpi-icon-streak">
+                <Flame aria-hidden="true" />
+              </span>
+              <div>
+                <div className="personal-kpi-label">Daily Streak</div>
+                <div className="personal-kpi-value tabular-nums">
+                  {dailyStreak}
+                  <small>{dailyStreak === 1 ? ' day' : ' days'}</small>
+                </div>
               </div>
             </div>
           </div>
@@ -198,67 +169,68 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
           <p className="text-xs text-[#6E6978] leading-relaxed">
             {user
-              ? 'Distinct Spots credit unique accepted potholes; Evidence credits supporting verification photos without inflating distinct totals.'
-              : 'Sign in with Google to connect with Atlanta contributors, unlock achievements, and track distinct-pothole rankings.'}
+              ? 'Collected potholes include every photo approved by PatchUp or an admin. Your streak grows when at least one capture is approved on consecutive days.'
+              : 'Sign in with Google to connect with Atlanta Patchers, unlock achievements, and track distinct-pothole rankings.'}
           </p>
         </section>
 
-        <section className="lg:col-span-7 bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
+        <section className="community-gallery lg:col-span-7 bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
           <div className="flex items-center justify-between gap-4">
-            <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-              Recent Atlanta Potholes
-            </h2>
+            <div>
+              <span className="page-banner-index">FROM PATCHERS ACROSS ATLANTA</span>
+              <h2 className="font-display text-lg font-bold text-[#2D2B35]">
+                Community Gallery
+              </h2>
+            </div>
             <span className="text-xs text-[#6E6978] tabular-nums">
-              {loading ? 'Loading...' : `${potholes.length} live records`}
+              {loading ? 'Loading...' : `${communityGalleryPotholes.length} captures`}
             </span>
           </div>
 
           {loading ? (
             <div className="py-10 text-center text-sm text-[#6E6978]">
-              Loading live Atlanta road-condition records...
+              Loading the community gallery...
             </div>
-          ) : potholes.length === 0 ? (
+          ) : communityGalleryPotholes.length === 0 ? (
             <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-6 text-center space-y-2">
               <MapPin className="w-7 h-7 text-[#6E6978] mx-auto" />
-              <h3 className="text-sm font-semibold text-[#2D2B35]">No pothole submissions yet</h3>
+              <h3 className="text-sm font-semibold text-[#2D2B35]">No community captures yet</h3>
               <p className="text-xs text-[#6E6978] max-w-md mx-auto leading-relaxed">
-                PatchUp displays real accepted community records only—no synthetic demo pins. Tap
-                Capture to document the first Atlanta street defect.
+                Approved potholes captured by Patchers across Atlanta will appear here.
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-[#E8DFC5]">
-              {potholes.slice(0, 5).map((item) => (
+            <div className="community-polaroid-grid">
+              {communityGalleryPotholes.slice(0, 6).map((item) => (
                 <button
                   key={item.potholeId}
                   type="button"
                   onClick={() => onInspectPothole(item)}
-                  className="w-full py-3 flex items-center justify-between gap-3 text-left hover:bg-[#F7F7F8] px-2 -mx-2 rounded-xl transition min-h-[56px]"
+                  className="community-polaroid"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src={item.primaryPhotoUrl}
-                      alt={item.streetName}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded-xl object-cover border border-[#E8DFC5] shrink-0 bg-[#F7F7F8]"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-[#2D2B35] truncate">
-                        {item.streetName}
-                      </div>
-                      <div className="text-xs text-[#6E6978] truncate">
-                        {POTHOLE_STATUS_LABELS[item.status] ?? item.status} ·{' '}
-                        {COORDINATE_SOURCE_LABELS[item.coordinateSource]} · @
-                        {item.primaryContributorUsername}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="font-mono text-sm font-bold text-[#2D2B35] tabular-nums">
-                      {item.evidenceCount}
-                    </div>
-                    <div className="text-[11px] text-[#6E6978]">evidence</div>
-                  </div>
+                  <span className="community-polaroid-photo">
+                    <ProtectedImage publicPhoto src={item.primaryPhotoUrl+'?variant=thumb'} alt={item.streetName} referrerPolicy="no-referrer" />
+                  </span>
+                  <span className="community-polaroid-caption">
+                    <span className="community-polaroid-location">{item.streetName}</span>
+                    <span className="community-polaroid-author">
+                      <span className="community-polaroid-avatar">
+                        {item.primaryContributorPhotoURL ? (
+                          <img
+                            src={item.primaryContributorPhotoURL}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          item.primaryContributorDisplayName.slice(0, 1).toUpperCase()
+                        )}
+                      </span>
+                      <span className="community-polaroid-identity">
+                        <strong>@{item.primaryContributorUsername}</strong>
+                        <small>{POTHOLE_STATUS_LABELS[item.status] ?? item.status}</small>
+                      </span>
+                    </span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -279,9 +251,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div>
             <span className="page-banner-index">YOUR CAMERA ROLL</span>
             <h2 className="font-display text-xl font-bold text-[#2D2B35]">Potholes you’ve captured</h2>
+            <p>Only verified captures appear here, organized for quick scanning.</p>
           </div>
-          <span className="font-mono text-xs tabular-nums">
-            {gallerySubmissions.length} approved photos
+          <span className="home-gallery-count tabular-nums">
+            <strong>{gallerySubmissions.length}</strong>
+            approved {gallerySubmissions.length === 1 ? 'capture' : 'captures'}
           </span>
         </div>
         {gallerySubmissions.length === 0 ? (
@@ -297,14 +271,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="home-photo-grid">
             {gallerySubmissions.slice(0, 8).map((submission) => (
               <figure key={submission.submissionId}>
-                <img
-                  src={submission.photoUrl}
-                  alt={`Pothole submission at ${submission.streetName}`}
-                  referrerPolicy="no-referrer"
-                />
+                <div className="home-photo-frame">
+                  <ProtectedImage
+                    src={submission.photoUrl+'?variant=thumb'}
+                    alt={`Pothole submission at ${submission.streetName}`}
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
                 <figcaption>
                   <strong>{submission.streetName}</strong>
-                  <span>{submission.duplicateStatus.replaceAll('_', ' ')}</span>
+                  <span>
+                    {submission.duplicateStatus === 'distinct'
+                      ? 'New pothole'
+                      : 'Supporting evidence'}
+                  </span>
                 </figcaption>
               </figure>
             ))}
@@ -325,32 +305,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </p>
             </div>
 
-            {user && (
-              <div className="inline-flex items-center gap-1 p-1 bg-[#F7F7F8] border border-[#E8DFC5] rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setFeedScope('all')}
-                  className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
-                    feedScope === 'all'
-                      ? 'bg-white text-[#2D2B35] shadow-xs'
-                      : 'text-[#6E6978] hover:text-[#2D2B35]'
-                  }`}
-                >
-                  All Atlanta
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedScope('friends')}
-                  className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
-                    feedScope === 'friends'
-                      ? 'bg-white text-[#2D2B35] shadow-xs'
-                      : 'text-[#6E6978] hover:text-[#2D2B35]'
-                  }`}
-                >
-                  Friends
-                </button>
-              </div>
-            )}
+
           </div>
 
           {loadingFeed ? (
@@ -358,7 +313,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           ) : visibleFeedEvents.length === 0 ? (
             <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-5 text-xs text-[#6E6978]">
               {feedScope === 'friends'
-                ? 'No recent activity from connected friends yet. Search for contributors on Profile to connect.'
+                ? 'No recent activity from connected friends yet. Search for Patchers on Profile to connect.'
                 : 'No community events recorded yet. Document a pothole or unlock your first badge to start the feed.'}
             </div>
           ) : (
@@ -436,18 +391,28 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     item.read ? 'opacity-70' : ''
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="font-semibold text-[#2D2B35]">{item.title}</div>
-                    <p className="text-[#4B4646] mt-0.5 leading-relaxed">{item.body}</p>
-                    {item.type === 'friend_request' && (
-                      <button
-                        type="button"
-                        onClick={() => onNavigate('profile')}
-                        className="mt-1.5 text-[11px] font-semibold text-[#4CB729] hover:underline"
-                      >
-                        Review in Friends →
-                      </button>
+                  <div className="min-w-0 flex items-start gap-2.5">
+                    {item.type === 'badge_unlocked' && item.relatedId && (
+                      <AchievementBadge
+                        badgeType={item.relatedId}
+                        state="earned"
+                        title={item.title.replace(/^Badge Unlocked:\s*/i, '')}
+                        className="w-12 h-12 -my-1"
+                      />
                     )}
+                    <div className="min-w-0">
+                      <div className="font-semibold text-[#2D2B35]">{item.title}</div>
+                      <p className="text-[#4B4646] mt-0.5 leading-relaxed">{item.body}</p>
+                      {item.type === 'friend_request' && (
+                        <button
+                          type="button"
+                          onClick={() => onNavigate('profile')}
+                          className="mt-1.5 text-[11px] font-semibold text-[#4CB729] hover:underline"
+                        >
+                          Review in Friends →
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {!item.read && (
                     <button
@@ -484,8 +449,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 className="py-3.5 flex items-center justify-between gap-3"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <img
-                    src={sub.photoUrl}
+                  <ProtectedImage
+                    src={sub.photoUrl+'?variant=thumb'}
                     alt={sub.streetName}
                     referrerPolicy="no-referrer"
                     className="w-12 h-12 rounded-xl object-cover border border-[#E8DFC5] shrink-0 bg-[#F7F7F8]"
@@ -508,86 +473,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </section>
       )}
 
-      {/* Pending Duplicate Reviews for Signed-In Contributor */}
-      {user && pendingReviews.length > 0 && (
-        <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-[#D97706]" />
-              <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-                Your Provisional Duplicate Reviews ({pendingReviews.length})
-              </h2>
-            </div>
-            <span className="text-xs text-[#6E6978]">Excluded from counts until resolved</span>
-          </div>
 
-          {resolveMessage && (
-            <div className="rounded-xl bg-[#4CB729]/10 border border-[#4CB729]/30 px-4 py-2.5 text-xs text-[#2D2B35] flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[#4CB729] shrink-0" />
-              <span>{resolveMessage}</span>
-            </div>
-          )}
 
-          <div className="divide-y divide-[#E8DFC5]">
-            {pendingReviews.map((sub) => {
-              const firstCandidateId = sub.candidatePotholeIds?.[0];
-              return (
-                <div
-                  key={sub.submissionId}
-                  className="py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src={sub.photoUrl}
-                      alt={sub.streetName}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded-xl object-cover border border-[#E8DFC5] shrink-0 bg-[#F7F7F8]"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-[#2D2B35] truncate">
-                        {sub.formattedAddress}
-                      </div>
-                      <div className="text-xs text-[#6E6978]">
-                        Hold reason: nearby candidate within 25m · Confidence{' '}
-                        {Math.round(sub.duplicateConfidence * 100)}%
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    {firstCandidateId && (
-                      <button
-                        type="button"
-                        disabled={resolvingId === sub.submissionId}
-                        onClick={() =>
-                          void handleResolvePending(
-                            sub.submissionId,
-                            'merge_evidence',
-                            firstCandidateId
-                          )
-                        }
-                        className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35] whitespace-nowrap disabled:opacity-50"
-                      >
-                        Merge as Evidence
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={resolvingId === sub.submissionId}
-                      onClick={() =>
-                        void handleResolvePending(sub.submissionId, 'confirm_distinct')
-                      }
-                      className="min-h-[40px] px-3 py-1.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-xs font-semibold text-white whitespace-nowrap disabled:opacity-50"
-                    >
-                      Confirm Separate Pothole
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
     </div>
   );
 };

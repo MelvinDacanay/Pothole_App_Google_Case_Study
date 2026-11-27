@@ -28,13 +28,7 @@ function pruneExpiredBuckets(nowMs: number) {
 }
 
 export function extractClientKey(req: express.Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0].trim().slice(0, 64);
-  }
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return String(forwarded[0]).trim().slice(0, 64);
-  }
+  // Do not trust a caller-supplied X-Forwarded-For header.
   return String(req.ip || req.socket?.remoteAddress || 'unknown').slice(0, 64);
 }
 

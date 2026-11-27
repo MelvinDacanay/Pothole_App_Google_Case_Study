@@ -1,6 +1,13 @@
 import { FieldValue, type Firestore, type Timestamp } from 'firebase-admin/firestore';
 
-export type MinigameId = 'pothole_repair' | 'pothole_runner';
+export const MINIGAME_IDS = [
+  'pothole_repair',
+  'pothole_runner',
+  'crater_blitz',
+  'connector_cruise',
+] as const;
+
+export type MinigameId = (typeof MINIGAME_IDS)[number];
 
 export interface ValidatedGameSubmission {
   gameId: MinigameId;
@@ -20,7 +27,7 @@ export interface ServerGameStat {
 }
 
 export function isValidMinigameId(value: unknown): value is MinigameId {
-  return value === 'pothole_repair' || value === 'pothole_runner';
+  return typeof value === 'string' && (MINIGAME_IDS as readonly string[]).includes(value);
 }
 
 export function validateGameScorePayload(input: {
@@ -57,6 +64,53 @@ export function validateGameScorePayload(input: {
       ok: true,
       value: {
         gameId: 'pothole_repair',
+        score: rawScore,
+        durationMs: rawDuration,
+      },
+    };
+  }
+
+  if (input.gameId === 'crater_blitz') {
+    if (rawScore > 6000) {
+      return { ok: false, error: 'Pothole Blitz score exceeds maximum valid bound (6000).' };
+    }
+    if (rawDuration < 5000 || rawDuration > 120000) {
+      return {
+        ok: false,
+        error: 'Pothole Blitz durationMs is outside plausible bounds (5000ms–120000ms).',
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        gameId: 'crater_blitz',
+        score: rawScore,
+        durationMs: rawDuration,
+      },
+    };
+  }
+
+  if (input.gameId === 'connector_cruise') {
+    if (rawScore > 50000) {
+      return { ok: false, error: 'Connector Cruise score exceeds maximum valid bound (50000).' };
+    }
+    if (rawDuration < 1500 || rawDuration > 3600000) {
+      return {
+        ok: false,
+        error: 'Connector Cruise durationMs is outside plausible bounds (1500ms–3600000ms).',
+      };
+    }
+    const maxCruiseScore = Math.floor(rawDuration / 10) + 120;
+    if (rawScore > maxCruiseScore) {
+      return {
+        ok: false,
+        error: `Submitted score (${rawScore}) is implausible for recorded run duration (${rawDuration}ms).`,
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        gameId: 'connector_cruise',
         score: rawScore,
         durationMs: rawDuration,
       },
@@ -154,9 +208,8 @@ export async function getUserGameStats(
   serverDb: Firestore,
   uid: string
 ): Promise<Record<MinigameId, ServerGameStat | null>> {
-  const repairRef = serverDb.collection('gameStats').doc(`${uid}_pothole_repair`);
-  const runnerRef = serverDb.collection('gameStats').doc(`${uid}_pothole_runner`);
-  const [repairSnap, runnerSnap] = await serverDb.getAll(repairRef, runnerRef);
+  const refs = MINIGAME_IDS.map((id) => serverDb.collection('gameStats').doc(`${uid}_${id}`));
+  const snaps = await serverDb.getAll(...refs);
 
   const mapDoc = (snap: FirebaseFirestore.DocumentSnapshot, gameId: MinigameId): ServerGameStat | null => {
     if (!snap.exists) return null;
@@ -175,7 +228,9 @@ export async function getUserGameStats(
   };
 
   return {
-    pothole_repair: mapDoc(repairSnap, 'pothole_repair'),
-    pothole_runner: mapDoc(runnerSnap, 'pothole_runner'),
+    pothole_repair: mapDoc(snaps[0], 'pothole_repair'),
+    pothole_runner: mapDoc(snaps[1], 'pothole_runner'),
+    crater_blitz: mapDoc(snaps[2], 'crater_blitz'),
+    connector_cruise: mapDoc(snaps[3], 'connector_cruise'),
   };
 }

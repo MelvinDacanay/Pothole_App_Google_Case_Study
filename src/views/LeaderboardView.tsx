@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Award, CheckCircle2, Lock, Users } from 'lucide-react';
+import { Award, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useAchievements } from '../hooks/useSocial';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import {
+  AchievementBadge,
+  getAchievementBadgeState,
+} from '../components/AchievementBadge';
 
 type LeaderboardPeriod = 'overall' | 'weekly' | 'monthly' | 'neighborhood';
 
@@ -78,7 +82,7 @@ export const LeaderboardView: React.FC = () => {
     <div className="city-page city-leaderboard max-w-6xl mx-auto space-y-6">
       <div className="page-banner page-banner-ranks">
         <div>
-          <span className="page-banner-index">THE SCORE / 04</span>
+          <span className="page-banner-index">THE SCORE</span>
           <h1>WHO RUNS<br /><em>THE BLOCK?</em></h1>
           <p>Verified finds only. See which Patchers and neighborhoods are putting in the street work.</p>
         </div>
@@ -91,8 +95,7 @@ export const LeaderboardView: React.FC = () => {
               Atlanta Leaderboards
             </h1>
             <p className="text-sm text-[#6E6978] mt-1">
-              Server-maintained ranks count accepted distinct potholes only; evidence credits
-              appear separately and cannot inflate distinct rank.
+              Psst, Patcher! Climb the ranks to catch the most potholes!
             </p>
           </div>
           <Award className="w-7 h-7 text-[#4CB729] shrink-0" />
@@ -102,7 +105,7 @@ export const LeaderboardView: React.FC = () => {
           <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-6 text-center space-y-4">
             <Users className="w-8 h-8 text-[#6E6978] mx-auto" />
             <p className="text-sm text-[#3A3535]">
-              Sign in with Google to view live opted-in Atlanta contributors across overall, weekly,
+              Sign in with Google to view live opted-in Atlanta Patchers across overall, weekly,
               monthly, and neighborhood standings.
             </p>
             <div className="flex justify-center">
@@ -168,8 +171,8 @@ export const LeaderboardView: React.FC = () => {
             ) : entries.length === 0 ? (
               <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-6 text-center text-sm text-[#6E6978]">
                 {period === 'neighborhood'
-                  ? 'No contributors have opted in to share a neighborhood here yet. Enable neighborhood sharing in Profile to join.'
-                  : 'No opted-in contributors listed yet.'}
+                  ? 'No Patchers have opted in to share a neighborhood here yet. Enable neighborhood sharing in Profile to join.'
+                  : 'No opted-in Patchers listed yet.'}
               </div>
             ) : (
               <div className="divide-y divide-[#E8DFC5]">
@@ -225,8 +228,7 @@ export const LeaderboardView: React.FC = () => {
               Atlanta Community Achievements
             </h2>
             <p className="text-xs text-[#6E6978] mt-1">
-              Evaluated server-side from accepted distinct potholes and credibly confirmed
-              repairs—never unlocked merely for submitting reports.
+              As you catch more potholes, you can unlock more achievements!
             </p>
           </div>
 
@@ -236,39 +238,51 @@ export const LeaderboardView: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {badges.map((badge) => {
                 const pct = Math.min(100, Math.round((badge.progress / badge.target) * 100));
+                const badgeState = getAchievementBadgeState(badge);
                 return (
                   <div
                     key={badge.badgeType}
-                    className={`rounded-xl border p-4 space-y-2 ${
+                    className={`rounded-xl border p-4 ${
                       badge.unlocked
                         ? 'border-[#4CB729]/50 bg-[#4CB729]/5'
                         : 'border-[#E8DFC5] bg-[#F7F7F8]'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-bold text-[#2D2B35]">{badge.title}</div>
-                        <p className="text-xs text-[#4B4646] mt-0.5">{badge.description}</p>
-                      </div>
-                      {badge.unlocked ? (
-                        <CheckCircle2 className="w-5 h-5 text-[#4CB729] shrink-0" />
-                      ) : (
-                        <Lock className="w-4 h-4 text-[#6E6978] shrink-0 mt-0.5" />
-                      )}
-                    </div>
+                    <div className="flex items-center gap-3 sm:gap-4">
+                      <AchievementBadge
+                        badgeType={badge.badgeType}
+                        state={badgeState}
+                        title={badge.title}
+                        className="w-24 h-24 sm:w-28 sm:h-28"
+                      />
+                      <div className="min-w-0 flex-1 space-y-3">
+                        <div>
+                          <div className="text-sm font-bold text-[#2D2B35]">{badge.title}</div>
+                          <p className="text-xs text-[#4B4646] mt-0.5">
+                            {badge.description}
+                          </p>
+                        </div>
 
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[11px] font-mono text-[#6E6978] tabular-nums">
-                        <span>{badge.unlocked ? 'Unlocked' : 'In progress'}</span>
-                        <span>
-                          {badge.progress} / {badge.target}
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full bg-white border border-[#E8DFC5] overflow-hidden">
-                        <div
-                          className={`h-full ${badge.unlocked ? 'bg-[#4CB729]' : 'bg-[#6E6978]/50'}`}
-                          style={{ width: `${pct}%` }}
-                        />
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] font-mono text-[#6E6978] tabular-nums">
+                            <span>
+                              {badgeState === 'earned'
+                                ? 'Earned'
+                                : badgeState === 'in-progress'
+                                  ? 'In progress'
+                                  : 'Locked'}
+                            </span>
+                            <span>
+                              {badge.progress} / {badge.target}
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-white border border-[#E8DFC5] overflow-hidden">
+                            <div
+                              className={`h-full ${badge.unlocked ? 'bg-[#4CB729]' : 'bg-[#6E6978]/50'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>

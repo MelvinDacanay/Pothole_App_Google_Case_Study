@@ -1,873 +1,247 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Bell,
-  Camera,
-  Check,
-  Database,
-  FileText,
-  Gamepad2,
-  HardDrive,
-  LogOut,
-  Search,
-  ShieldCheck,
-  Trash2,
-  UserPlus,
-  Users,
-  X,
-} from 'lucide-react';
+import { Camera, Check, LogOut, MapPin, Pencil, RefreshCw, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useMySubmissions } from '../hooks/usePotholes';
 import { FriendSearchUser, useFriends } from '../hooks/useSocial';
 import { compressImageForUpload, uploadImageWithRetry } from '../lib/imageUpload';
-import { COORDINATE_SOURCE_LABELS } from '../lib/maps';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
-import { PWAInstallButton } from '../components/PWAInstallButton';
-
-interface ServerHealth {
-  ok: boolean;
-  service: string;
-  phase: number;
-  firebaseConfigured: boolean;
-  firebaseProjectId: string | null;
-  firestoreDatabaseId: string | null;
-  firebaseStorageEnabled: boolean;
-  mediaStoreMode: string;
-  mapsConfigured: boolean;
-  adminSdkMode: string;
-  adminAuthVerifyReady: boolean;
-  adminFirestoreReady: boolean;
-  geminiConfigured: boolean;
-  geminiModel: string;
-}
+import { readApiJson } from '../lib/apiResponse';
 
 interface ProfileViewProps {
-  onOpenCommunity: () => void;
   onOpenGames: () => void;
 }
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenCommunity, onOpenGames }) => {
-  const {
-    user,
-    publicProfile,
-    privateAccount,
-    isAdmin,
-    firestoreStatus,
-    authError,
-    isSigningIn,
-    signIn,
-    signOut,
-    updateProfile,
-    updateNotificationsPref,
-  } = useAuth();
-
-  const { submissions, loading: loadingSubmissions } = useMySubmissions(user?.uid ?? null);
-  const {
-    acceptedFriends,
-    incomingRequests,
-    outgoingRequests,
-    sendFriendRequest,
-    respondToFriend,
-    searchUsers,
-  } = useFriends(user);
-
-  const [displayNameInput, setDisplayNameInput] = useState('');
-  const [usernameInput, setUsernameInput] = useState('');
-  const [neighborhoodInput, setNeighborhoodInput] = useState('');
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  // Avatar upload via Spark-tier isolated /mediaObjects
-  const avatarInputRef = useRef<HTMLInputElement | null>(null);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-
-  // Friends search & action feedback
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<FriendSearchUser[]>([]);
-  const [friendFeedback, setFriendFeedback] = useState<string | null>(null);
-
-  // Web Push / Browser Notification capability check
-  const [browserPushPermission, setBrowserPushPermission] = useState<string>(() =>
-    typeof window !== 'undefined' && 'Notification' in window
-      ? window.Notification.permission
-      : 'unsupported'
+function Avatar({ src, name, large = false }: { src?: string; name: string; large?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  return (
+    <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-[#fffaf0] bg-[#ffcf35] text-[#17231d] ${large ? 'h-28 w-28 sm:h-32 sm:w-32' : 'h-14 w-14'}`}>
+      {src && !failed ? <img src={src} alt={name} referrerPolicy="no-referrer" onError={() => setFailed(true)} className="h-full w-full object-cover" /> :
+        <svg viewBox="0 0 48 48" className="h-full w-full" role="img" aria-label={`${name}'s default avatar`}>
+          <circle cx="24" cy="18" r="9" fill="#17231d" />
+          <path d="M7 48v-6a17 17 0 0 1 34 0v6" fill="#17231d" />
+        </svg>}
+    </span>
   );
+}
 
-  const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
-  const [tokenSessionStatus, setTokenSessionStatus] = useState<string>('Not checked');
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
-  const [deletingAccount, setDeletingAccount] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+const button = 'min-h-11 rounded-full px-5 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#17231d] disabled:cursor-not-allowed';
+const field = 'min-h-11 w-full rounded-xl border border-[#c8c5b9] bg-[#fffdf7] px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-[#17231d]';
+const panel = 'rounded-2xl border border-[#d7d2c4] bg-[#fffaf0] p-5 sm:p-7';
+
+export const ProfileView: React.FC<ProfileViewProps> = () => {
+  const { user, publicProfile, privateAccount, authError, isSigningIn, signIn, signOut, updateProfile, updateNotificationsPref } = useAuth();
+  const { acceptedFriends, incomingRequests, outgoingRequests, sendFriendRequest, respondToFriend, searchUsers, error: friendsError } = useFriends(user);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ displayName: '', username: '', homeNeighborhood: '', bio: '', showOnLeaderboard: false, shareNeighborhood: false });
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [avatarConsent,setAvatarConsent]=useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const avatarInput = useRef<HTMLInputElement>(null);
+  const displayInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<FriendSearchUser[]>([]);
+  const [recommendations, setRecommendations] = useState<FriendSearchUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [pending, setPending] = useState<string | null>(null);
+  const [tab, setTab] = useState('Discover');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
 
   useEffect(() => {
-    if (publicProfile) {
-      setDisplayNameInput(publicProfile.displayName);
-      setUsernameInput(publicProfile.username);
-      setNeighborhoodInput(publicProfile.homeNeighborhood ?? '');
-    }
+    if (!publicProfile) return;
+    setForm({
+      displayName: publicProfile.displayName, username: publicProfile.username,
+      homeNeighborhood: publicProfile.homeNeighborhood || '', bio: publicProfile.bio || '',
+      showOnLeaderboard: publicProfile.showOnLeaderboard, shareNeighborhood: publicProfile.shareNeighborhood,
+    });
   }, [publicProfile]);
+  useEffect(() => { if (editing) displayInput.current?.focus(); }, [editing]);
 
   useEffect(() => {
-    fetch('/api/health')
-      .then((res) => res.json())
-      .then((data: ServerHealth) => setServerHealth(data))
-      .catch(() => setServerHealth(null));
-  }, []);
+    if (!user) { setRecommendations([]); return; }
+    let active = true;
+    setLoadingRecommendations(true);
+    setDiscoveryError('');
+    searchUsers('', true).then((items) => { if (active) setRecommendations(items.slice(0, 6)); })
+      .catch((err) => { if (active) setDiscoveryError(err.message); })
+      .finally(() => { if (active) setLoadingRecommendations(false); });
+    return () => { active = false; };
+  }, [user, searchUsers, refresh]);
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-    try {
-      await updateProfile({
-        displayName: displayNameInput,
-        username: usernameInput,
-        homeNeighborhood: neighborhoodInput,
-      });
-      setSaveMessage('Profile updated and synced with leaderboard.');
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Unable to save profile.');
-    } finally {
-      setSaving(false);
-    }
+  useEffect(() => {
+    let active = true;
+    setResults([]);
+    if (!query.trim() || !user) { setSearching(false); return; }
+    setSearching(true);
+    setDiscoveryError('');
+    const timer = window.setTimeout(() => {
+      searchUsers(query).then((items) => { if (active) setResults(items); })
+        .catch((err) => { if (active) setDiscoveryError(err.message); })
+        .finally(() => { if (active) setSearching(false); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [query, user, searchUsers, refresh]);
+
+  const perform = async (key: string, action: () => Promise<unknown>, success: string) => {
+    setPending(key); setError(''); setMessage('');
+    try { await action(); setMessage(success); setRefresh((value) => value + 1); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Please try again.'); }
+    finally { setPending(null); }
   };
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-    setSaveError(null);
-    setSaveMessage(null);
-    setUploadingAvatar(true);
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true); setError(''); setMessage('');
+    try { await updateProfile(form); setEditing(false); setMessage('Your profile is updated.'); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Unable to save profile.'); }
+    finally { setSaving(false); }
+  };
+
+  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user || !avatarConsent) return;
+    setUploading(true); setError('');
     try {
       const compressed = await compressImageForUpload(file);
-      const mediaId = `avt_${user.uid.slice(0, 8)}_${Date.now()}`;
-      const res = await uploadImageWithRetry({
-        uid: user.uid,
-        fileId: mediaId,
-        compressed,
-      });
-      await updateProfile({ photoURL: res.downloadUrl });
-      setSaveMessage('Profile avatar updated.');
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Avatar upload failed.');
-    } finally {
-      setUploadingAvatar(false);
-      if (avatarInputRef.current) avatarInputRef.current.value = '';
-    }
+      const media = await uploadImageWithRetry({ uid: user.uid, fileId: `avt_${user.uid.slice(0, 8)}_${Date.now()}`, compressed,privacyConfirmed:avatarConsent });
+      await updateProfile({ photoURL: media.downloadUrl });
+      setMessage('Profile photo updated.');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Photo upload failed.'); }
+    finally { setUploading(false); event.target.value = ''; }
   };
 
-  const handleFriendSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim().length < 2) {
-      setFriendFeedback('Enter at least 2 characters to search by username or display name.');
-      return;
-    }
-    setSearching(true);
-    setFriendFeedback(null);
-    try {
-      const users = await searchUsers(searchQuery);
-      setSearchResults(users);
-      if (users.length === 0) {
-        setFriendFeedback('No matching contributors found.');
-      }
-    } catch {
-      setFriendFeedback('Search failed. Please try again.');
-    } finally {
-      setSearching(false);
-    }
-  };
+  const name = publicProfile?.displayName || 'Your Patcher profile';
+  const isSearching = query.trim().length > 0;
+  const people = isSearching ? results : recommendations;
+  const relatedIds = new Set([...acceptedFriends, ...incomingRequests, ...outgoingRequests].map((friend) => friend.otherUid));
 
-  const handleSendFriendRequest = async (targetUid: string) => {
-    setFriendFeedback(null);
-    try {
-      const res = await sendFriendRequest(targetUid);
-      setFriendFeedback(
-        res.status === 'accepted' ? 'Friend connection accepted.' : 'Friend request sent.'
-      );
-      if (searchQuery.trim().length >= 2) {
-        const refreshed = await searchUsers(searchQuery);
-        setSearchResults(refreshed);
-      }
-    } catch (err) {
-      setFriendFeedback(err instanceof Error ? err.message : 'Unable to send request.');
-    }
-  };
-
-  const handleFriendAction = async (
-    friendshipId: string,
-    action: 'accept' | 'decline' | 'remove'
-  ) => {
-    setFriendFeedback(null);
-    try {
-      await respondToFriend(friendshipId, action);
-      setFriendFeedback(
-        action === 'accept'
-          ? 'Friend request accepted.'
-          : action === 'decline'
-            ? 'Friend request declined.'
-            : 'Connection removed.'
-      );
-    } catch (err) {
-      setFriendFeedback(err instanceof Error ? err.message : 'Unable to update friendship.');
-    }
-  };
-
-  const handleRequestBrowserNotifications = async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      setBrowserPushPermission('unsupported');
-      return;
-    }
-    try {
-      const permission = await window.Notification.requestPermission();
-      setBrowserPushPermission(permission);
-    } catch {
-      // Ignore permission rejection
-    }
-  };
-
-  const verifyBackendToken = async () => {
-    if (!user) return;
-    setTokenSessionStatus('Checking...');
-    try {
-      const idToken = await user.getIdToken();
-      const res = await fetch('/api/auth/session', {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setTokenSessionStatus(`Verified (${data.uid}, admin=${String(data.admin)})`);
-      } else {
-        setTokenSessionStatus(`Server returned ${res.status}: ${data.error}`);
-      }
-    } catch (err) {
-      setTokenSessionStatus(err instanceof Error ? err.message : 'Request failed');
-    }
-  };
-
-  const handleDeleteAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || deleteConfirmInput.trim() !== 'DELETE') return;
-    setDeletingAccount(true);
-    setDeleteError(null);
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch('/api/account', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ confirmText: 'DELETE' }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Unable to delete account.');
-      }
-      setShowDeleteConfirm(false);
-      setDeleteConfirmInput('');
-      await signOut();
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Account deletion failed.');
-    } finally {
-      setDeletingAccount(false);
-    }
-  };
+  function PersonCard({ person }: { person: FriendSearchUser }) {
+    const related = relatedIds.has(person.uid) || ['pending', 'accepted'].includes(person.friendshipStatus);
+    return (
+      <article className="min-w-0 rounded-xl border border-[#ded9ca] bg-[#f7f3e9] p-4">
+        <div className="flex items-center gap-3">
+          <Avatar src={person.photoURL} name={person.displayName} />
+          <div className="min-w-0">
+            <h3 className="truncate font-sans text-sm font-bold">{person.displayName}</h3>
+            <p className="truncate text-sm text-slate-600">@{person.username}</p>
+          </div>
+        </div>
+        <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-slate-600">{person.bio || 'This Patcher hasn’t added a bio yet.'}</p>
+        <button disabled={related || pending !== null} onClick={() => void perform(person.uid, () => sendFriendRequest(person.uid), 'Friend request sent.')} className={`${button} mt-4 flex w-full items-center justify-center gap-2 ${related ? 'border border-[#c8c5b9]' : 'bg-[#17231d] text-white hover:bg-[#314b3e]'}`}>
+          {related ? <Check className="h-4 w-4 shrink-0" aria-hidden="true" /> : <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />}
+          {pending === person.uid ? 'Sending…' : person.friendshipStatus === 'accepted' ? 'Friends' : related ? 'Request pending' : 'Add friend'}
+        </button>
+      </article>
+    );
+  }
 
   return (
-    <div className="city-page city-profile max-w-6xl mx-auto space-y-6">
-      <div className="page-banner page-banner-profile">
-        <div>
-          <span className="page-banner-index">PATCHER ID / 06</span>
-          <h1>THIS IS YOUR<br /><em>PATCH.</em></h1>
-          <p>Your public identity, neighborhood connections, evidence history, and settings in one place.</p>
+    <div className="mx-auto max-w-6xl space-y-5 overflow-x-hidden pb-8 text-[#17231d]">
+      <header className="overflow-hidden rounded-2xl border border-[#d7d2c4] bg-[#fffaf0]">
+        <div className="flex h-28 items-start justify-between bg-[#b9d8c4] px-6 py-5 sm:h-36 sm:px-8">
+          <span className="text-xs font-bold tracking-[.18em]">YOUR CORNER OF ATLANTA</span>
+          <span className="rounded-full border border-[#17231d] px-3 py-1 text-xs font-bold">PATCHER PROFILE</span>
         </div>
-        <Users className="page-banner-icon" aria-hidden="true" />
-      </div>
-      <section className="profile-card bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-8 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-4">
+        <div className="px-5 pb-6 sm:px-8">
+          <div className="-mt-12 flex flex-wrap items-end justify-between gap-4">
             <div className="relative">
-              {publicProfile?.photoURL ? (
-                <img
-                  src={publicProfile.photoURL}
-                  alt={publicProfile.displayName}
-                  referrerPolicy="no-referrer"
-                  className="w-16 h-16 rounded-2xl object-cover border border-[#E8DFC5]"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-2xl bg-[#F7F7F8] border border-[#E8DFC5] flex items-center justify-center font-display text-2xl font-bold text-[#3A3535]">
-                  {(publicProfile?.displayName || 'P').slice(0, 1).toUpperCase()}
-                </div>
-              )}
-              {user && (
-                <>
-                  <input
-                    ref={avatarInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={(e) => void handleAvatarUpload(e)}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    disabled={uploadingAvatar}
-                    onClick={() => avatarInputRef.current?.click()}
-                    aria-label="Update profile photo"
-                    className="mt-1.5 text-[11px] font-semibold text-[#4CB729] hover:underline inline-flex items-center gap-1"
-                  >
-                    <Camera className="w-3 h-3" />
-                    <span>{uploadingAvatar ? 'Uploading...' : 'Change photo'}</span>
-                  </button>
-                </>
-              )}
+              <Avatar src={publicProfile?.photoURL} name={name} large />
+              {user && <button disabled={uploading||!avatarConsent} onClick={() => avatarInput.current?.click()} aria-label="Upload profile picture" className="absolute -bottom-1 -right-1 flex h-11 w-11 items-center justify-center rounded-full border-4 border-[#fffaf0] bg-[#17231d] text-white focus-visible:ring-2">
+                <Camera className="h-5 w-5 shrink-0" aria-hidden="true" />
+              </button>}
+              <input ref={avatarInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose profile photo" className="hidden" onChange={(event) => void upload(event)} />
             </div>
-            <div>
-              <h1 className="font-display text-2xl font-bold text-[#2D2B35]">
-                {user ? publicProfile?.displayName || 'Signed-in Contributor' : 'Guest Profile'}
-              </h1>
-              <div className="text-xs text-[#6E6978] flex flex-wrap items-center gap-2 mt-1">
-                <span>{user ? `@${publicProfile?.username ?? '...'}` : 'Not signed in'}</span>
-                {publicProfile?.shareNeighborhood && publicProfile.homeNeighborhood && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span>{publicProfile.homeNeighborhood}</span>
-                  </>
-                )}
-                {isAdmin && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span className="font-semibold text-[#4CB729]">Admin Claim Active</span>
-                  </>
-                )}
-              </div>
-            </div>
+            {user ? <div className="flex flex-wrap gap-2">
+              <button onClick={() => setEditing((value) => !value)} aria-expanded={editing} className={`${button} flex items-center gap-2 border border-[#17231d] hover:bg-[#ede8da]`}><Pencil className="h-4 w-4 shrink-0" aria-hidden="true" />Edit profile</button>
+              <button onClick={() => { setTab('Discover'); searchInput.current?.focus(); searchInput.current?.scrollIntoView({ block: 'center' }); }} className={`${button} flex items-center gap-2 bg-[#17231d] text-white hover:bg-[#314b3e]`}><UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />Find friends</button>
+            </div> : <GoogleSignInButton onClick={() => void signIn()} disabled={isSigningIn} />}
           </div>
+          <h1 className="mt-5 text-2xl sm:text-3xl">{name}</h1>
+          <p className="mt-1 text-sm text-slate-600">{user ? `@${publicProfile?.username || 'patcher'}` : 'Sign in to make this space yours and meet other Patchers.'}</p>
+          {publicProfile?.bio && <p className="mt-3 max-w-2xl whitespace-pre-line text-sm leading-6">{publicProfile.bio}</p>}
+          <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            {publicProfile?.shareNeighborhood && publicProfile.homeNeighborhood && <span className="flex items-center gap-1.5 text-slate-600"><MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />{publicProfile.homeNeighborhood}, Atlanta</span>}
+            <span><strong>{acceptedFriends.length}</strong> friends</span>
+            <span><strong>{incomingRequests.length}</strong> incoming requests</span>
+          </div>
+          {user&&<label className="mt-3 flex gap-2 text-sm"><input type="checkbox" checked={avatarConsent} onChange={e=>setAvatarConsent(e.target.checked)}/> I have permission to share my public profile photo.</label>}
+          {uploading && <p role="status" className="mt-3 text-sm">Uploading your photo…</p>}
+        </div>
+      </header>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={onOpenGames}
-              className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-xs font-semibold text-[#2D2B35] transition whitespace-nowrap"
-            >
-              <Gamepad2 className="w-4 h-4 text-[#4CB729]" />
-              <span>PatchUp Arcade</span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenCommunity}
-              className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/30 text-xs font-semibold text-[#2D2B35] transition whitespace-nowrap"
-            >
-              <FileText className="w-4 h-4 text-[#4CB729]" />
-              <span>{isAdmin ? 'Admin Community Queue' : 'Corridors & Reports'}</span>
-            </button>
-            <PWAInstallButton compact />
-            {user ? (
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-sm font-semibold text-[#3A3535] transition whitespace-nowrap"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Sign out</span>
-              </button>
-            ) : (
-              <GoogleSignInButton onClick={() => void signIn()} disabled={isSigningIn} />
-            )}
+      <div aria-live="polite">
+        {(error || authError) && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-800">{error || authError}</p>}
+        {message && <p role="status" className="rounded-xl border border-green-300 bg-green-50 p-4 text-sm text-green-900">{message}</p>}
+      </div>
+
+      {user && editing && <form onSubmit={(event) => void save(event)} className={`${panel} space-y-5`}>
+        <div><h2 className="text-xl">Edit profile</h2><p className="mt-1 text-sm text-slate-600">Let Atlanta get to know the Patcher behind the pin.</p></div>
+        <button type="button" disabled={uploading||!avatarConsent} onClick={() => avatarInput.current?.click()} className={`${button} border border-[#17231d]`}>{uploading ? 'Uploading…' : 'Upload profile picture'}</button>
+        <p className="text-sm text-slate-600">JPEG, PNG, or WebP · up to 10 MB</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm font-semibold"><span>Display name</span><input ref={displayInput} required maxLength={64} className={field} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} /></label>
+          <label className="space-y-2 text-sm font-semibold"><span>Username</span><input required pattern="[a-z0-9_]{3,32}" maxLength={32} className={field} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase() })} /><span className="block text-sm font-normal text-slate-600">3–32 lowercase letters, numbers, or underscores.</span></label>
+          <label className="space-y-2 text-sm font-semibold md:col-span-2"><span>Bio</span><textarea rows={3} maxLength={160} placeholder="A little about you and your corner of the city…" className={field} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /><span className="block text-right text-xs text-slate-600">{form.bio.length}/160</span></label>
+          <label className="space-y-2 text-sm font-semibold md:col-span-2"><span>Atlanta neighborhood <span className="font-normal text-slate-600">(optional)</span></span><input maxLength={64} placeholder="e.g., Midtown" className={field} value={form.homeNeighborhood} onChange={(e) => setForm({ ...form, homeNeighborhood: e.target.value })} /></label>
+        </div>
+        {[['showOnLeaderboard', 'Show me on the leaderboard'], ['shareNeighborhood', 'Show my neighborhood publicly']].map(([key, label]) => <label key={key} className="flex min-h-11 cursor-pointer items-center justify-between gap-4 text-sm">
+          {label}<input type="checkbox" className="h-5 w-5 accent-[#17231d]" checked={form[key as 'shareNeighborhood' | 'showOnLeaderboard']} onChange={(e) => setForm({ ...form, [key]: e.target.checked })} />
+        </label>)}
+        <button disabled={saving || uploading} className={`${button} bg-[#17231d] text-white`}>{saving ? 'Saving…' : 'Save changes'}</button>
+      </form>}
+
+      {user && <section className={`${panel} space-y-5`} aria-labelledby="connections-title">
+        <div className="flex items-start justify-between gap-3"><div><h2 id="connections-title" className="text-xl">Friends & connections</h2><p className="mt-2 text-sm text-slate-600">Good neighbors. Better streets. Find your people.</p></div><Users className="h-6 w-6 shrink-0" aria-hidden="true" /></div>
+        <div className="flex flex-wrap gap-1 border-b border-[#ded9ca]" role="tablist" aria-label="Connections">
+          {['Discover', 'Friends', 'Requests'].map((item) => <button key={item} role="tab" aria-selected={tab === item} aria-controls="connections-panel" id={`tab-${item}`} onClick={() => setTab(item)} className={`${button} rounded-none border-b-2 ${tab === item ? 'border-[#17231d]' : 'border-transparent text-slate-600'}`}>{item}{item === 'Friends' ? ` (${acceptedFriends.length})` : item === 'Requests' ? ` (${incomingRequests.length})` : ''}</button>)}
+        </div>
+        {friendsError && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">{friendsError}</p>}
+        <div id="connections-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
+          {tab === 'Discover' ? <div className="space-y-5">
+            <div className="relative"><Search className="pointer-events-none absolute left-4 top-3.5 h-5 w-5 shrink-0 text-slate-600" aria-hidden="true" /><input ref={searchInput} type="search" aria-label="Search Patchers by display name or username" autoComplete="off" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find Patchers by name or @username" className={`${field} min-h-12 pl-12`} /></div>
+            <div className="flex items-center justify-between gap-3"><h3 className="font-sans text-base font-bold">{isSearching ? 'Search results' : 'Recommended for you'}</h3>{!isSearching && <button aria-label="Refresh recommended Patchers" disabled={loadingRecommendations} onClick={() => setRefresh((value) => value + 1)} className={`${button} flex items-center gap-2 border border-[#c8c5b9]`}><RefreshCw className="h-4 w-4 shrink-0" aria-hidden="true" />Refresh</button>}</div>
+            <div aria-live="polite">
+              {discoveryError ? <p role="alert" className="text-sm text-red-800">{discoveryError}</p> : (isSearching ? searching : loadingRecommendations) ? <p className="py-6 text-sm text-slate-600">Finding Patchers…</p> : people.length ? <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{people.map((person) => <PersonCard key={person.uid} person={person} />)}</div> : <div className="rounded-xl bg-[#f0ecdf] p-6 text-sm text-slate-600">{isSearching ? 'No Patchers found. Try a shorter name or a different spelling.' : 'No new Patchers to recommend yet. Try searching for someone you know or check back soon.'}</div>}
+            </div>
+          </div> : <div className="divide-y divide-[#ded9ca]">
+            {(tab === 'Friends' ? acceptedFriends : incomingRequests).map((friend) => <div key={friend.friendshipId} className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <div className="flex min-w-0 items-center gap-3"><Avatar src={friend.photoURL} name={friend.displayName} /><div className="min-w-0"><p className="truncate text-sm font-bold">{friend.displayName}</p><p className="truncate text-sm text-slate-600">@{friend.username}</p></div></div>
+              <div className="flex gap-2">{tab === 'Requests' && <button disabled={pending !== null} onClick={() => void perform(friend.friendshipId, () => respondToFriend(friend.friendshipId, 'accept'), 'You’re now friends!')} className={`${button} bg-[#17231d] text-white`}>Accept</button>}<button disabled={pending !== null} onClick={() => void perform(friend.friendshipId, () => respondToFriend(friend.friendshipId, tab === 'Friends' ? 'remove' : 'decline'), 'Connection updated.')} className={`${button} border border-[#c8c5b9]`}>{tab === 'Friends' ? 'Remove' : 'Decline'}</button></div>
+            </div>)}
+            {(tab === 'Friends' ? acceptedFriends : incomingRequests).length === 0 && <p className="py-6 text-sm text-slate-600">{tab === 'Friends' ? 'Your community starts with a hello. Discover Patchers to send your first request.' : 'You’re all caught up. New friend requests will appear here.'}</p>}
+            {tab === 'Requests' && outgoingRequests.length > 0 && <p className="py-4 text-sm text-slate-600">Sent requests: {outgoingRequests.map((friend) => `@${friend.username}`).join(', ')}</p>}
+          </div>}
+        </div>
+      </section>}
+
+      {user && <details className={panel}>
+        <summary className="min-h-11 cursor-pointer py-2 text-base font-semibold">Account & privacy</summary>
+        <div className="mt-4 space-y-5 text-sm">
+          <p className="flex items-start gap-2 text-slate-600"><ShieldCheck className="h-5 w-5 shrink-0" aria-hidden="true" />Your email stays private. Location is requested only when you choose to capture a pothole or center the map.</p>
+          {privateAccount && <label className="flex min-h-11 items-center justify-between gap-4">In-app notifications<input type="checkbox" className="h-5 w-5 accent-[#17231d]" checked={privateAccount.notificationsEnabled} onChange={(e) => void perform('notifications', () => updateNotificationsPref(e.target.checked), 'Notification preference updated.')} disabled={pending !== null} /></label>}
+          <button onClick={() => void perform('signout', signOut, 'Signed out.')} className={`${button} inline-flex items-center gap-2 border border-[#c8c5b9]`}><LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />Sign out</button>
+          <div className="border-t border-[#ded9ca] pt-5">
+            {!deleteOpen ? <button onClick={() => setDeleteOpen(true)} className={`${button} text-red-800`}>Delete account & personal data</button> : <form className="space-y-3" onSubmit={(e) => {
+              e.preventDefault();
+              void perform('delete', async () => {
+                const token = await user.getIdToken();
+                const response = await fetch('/api/account', { method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ confirmText: deleteText }) });
+                await readApiJson<{ ok: boolean }>(response);
+                await signOut();
+              }, 'Account deleted.');
+            }}>
+              <p className="text-red-800">This permanently deletes your profile, friendships, and personal records. Accepted street potholes remain anonymized.</p>
+              <label className="block space-y-2"><span>Type DELETE to confirm</span><input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} className={field} /></label>
+              <div className="flex flex-wrap gap-2"><button disabled={deleteText !== 'DELETE' || pending !== null} className={`${button} bg-red-800 text-white`}>{pending === 'delete' ? 'Deleting…' : 'Permanently delete account'}</button><button type="button" onClick={() => { setDeleteOpen(false); setDeleteText(''); }} className={button}>Cancel</button></div>
+            </form>}
           </div>
         </div>
-
-        {authError && (
-          <div className="rounded-xl bg-[#DC2626]/10 border border-[#DC2626]/30 px-4 py-3 text-sm text-[#DC2626]">
-            {authError}
-          </div>
-        )}
-
-        {user && publicProfile && (
-          <form
-            onSubmit={(e) => void handleSaveProfile(e)}
-            className="space-y-5 pt-2 border-t border-[#E8DFC5]"
-          >
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold text-[#4B4646]">Display Name (Public)</span>
-                <input
-                  type="text"
-                  maxLength={64}
-                  required
-                  value={displayNameInput}
-                  onChange={(e) => setDisplayNameInput(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-sm text-[#2D2B35] focus:outline-2 focus:outline-[#4CB729]"
-                />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold text-[#4B4646]">Username (Public)</span>
-                <input
-                  type="text"
-                  maxLength={32}
-                  required
-                  pattern="^[a-z0-9_]{3,32}$"
-                  value={usernameInput}
-                  onChange={(e) => setUsernameInput(e.target.value.toLowerCase())}
-                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-sm font-mono text-[#2D2B35] focus:outline-2 focus:outline-[#4CB729]"
-                />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold text-[#4B4646]">
-                  Atlanta Neighborhood (Optional)
-                </span>
-                <input
-                  type="text"
-                  maxLength={64}
-                  placeholder="e.g., Midtown"
-                  value={neighborhoodInput}
-                  onChange={(e) => setNeighborhoodInput(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-sm text-[#2D2B35] focus:outline-2 focus:outline-[#4CB729]"
-                />
-              </label>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] cursor-pointer min-h-[44px]">
-                <span className="text-sm font-medium text-[#3A3535]">Show on Leaderboard</span>
-                <input
-                  type="checkbox"
-                  checked={publicProfile.showOnLeaderboard}
-                  onChange={(e) => void updateProfile({ showOnLeaderboard: e.target.checked })}
-                  className="w-5 h-5 accent-[#4CB729]"
-                />
-              </label>
-
-              <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] cursor-pointer min-h-[44px]">
-                <span className="text-sm font-medium text-[#3A3535]">Share Neighborhood</span>
-                <input
-                  type="checkbox"
-                  checked={publicProfile.shareNeighborhood}
-                  onChange={(e) => void updateProfile({ shareNeighborhood: e.target.checked })}
-                  className="w-5 h-5 accent-[#4CB729]"
-                />
-              </label>
-            </div>
-
-            {privateAccount && (
-              <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-[#4B4646]">
-                    Private Account Record (Owner-Only Subcollection)
-                  </span>
-                  <span className="max-w-full break-all text-xs font-mono text-[#6E6978]">
-                    {privateAccount.email}
-                  </span>
-                </div>
-                <label className="flex items-center justify-between gap-3 cursor-pointer min-h-[44px]">
-                  <span className="text-sm text-[#3A3535]">In-App Notifications Enabled</span>
-                  <input
-                    type="checkbox"
-                    checked={privateAccount.notificationsEnabled}
-                    onChange={(e) => void updateNotificationsPref(e.target.checked)}
-                    className="w-5 h-5 accent-[#4CB729]"
-                  />
-                </label>
-
-                <div className="pt-2 border-t border-[#E8DFC5] flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2 text-[#4B4646]">
-                    <Bell className="w-4 h-4 text-[#6E6978]" />
-                    <span>
-                      Browser Push Status:{' '}
-                      <span className="font-mono font-semibold text-[#2D2B35]">
-                        {browserPushPermission}
-                      </span>{' '}
-                      (in-app inbox always active)
-                    </span>
-                  </div>
-                  {browserPushPermission === 'default' && (
-                    <button
-                      type="button"
-                      onClick={() => void handleRequestBrowserNotifications()}
-                      className="min-h-[38px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-white hover:bg-[#E8DFC5]/40 font-semibold text-[#2D2B35]"
-                    >
-                      Enable Browser Alerts
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                disabled={saving}
-                className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white text-sm font-semibold transition disabled:opacity-60"
-              >
-                {saving ? 'Saving...' : 'Save Profile'}
-              </button>
-              {saveMessage && <span className="text-xs font-medium text-[#4CB729]">{saveMessage}</span>}
-              {saveError && <span className="text-xs font-medium text-[#DC2626]">{saveError}</span>}
-            </div>
-          </form>
-        )}
-      </section>
-
-      {/* Friends & Community Connections */}
-      {user && (
-        <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-                Friends & Connections ({acceptedFriends.length})
-              </h2>
-              <p className="text-xs text-[#6E6978] mt-0.5">
-                Search contributors by username to connect, filter the Atlanta map, and follow
-                street-level progress.
-              </p>
-            </div>
-            <Users className="w-5 h-5 text-[#4CB729] shrink-0" />
-          </div>
-
-          <form
-            onSubmit={(e) => void handleFriendSearch(e)}
-            className="flex flex-col min-[380px]:flex-row gap-2"
-          >
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search username or display name..."
-              className="flex-1 min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] text-sm text-[#2D2B35] focus:outline-2 focus:outline-[#4CB729]"
-            />
-            <button
-              type="submit"
-              disabled={searching}
-              className="min-h-[44px] px-4 py-2 rounded-xl bg-[#2D2B35] hover:bg-[#3A3535] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <Search className="w-4 h-4" />
-              <span>{searching ? 'Searching...' : 'Search'}</span>
-            </button>
-          </form>
-
-          {friendFeedback && (
-            <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] px-3.5 py-2.5 text-xs text-[#2D2B35]">
-              {friendFeedback}
-            </div>
-          )}
-
-          {searchResults.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-[#4B4646]">Search Results</div>
-              <div className="divide-y divide-[#E8DFC5] rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] px-3">
-                {searchResults.map((match) => (
-                  <div key={match.uid} className="py-2.5 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-[#2D2B35] truncate">
-                        {match.displayName}
-                      </div>
-                      <div className="text-[11px] font-mono text-[#6E6978] truncate">
-                        @{match.username} · {match.distinctPotholeCount} distinct
-                      </div>
-                    </div>
-
-                    {match.friendshipStatus === 'accepted' ? (
-                      <span className="text-xs font-semibold text-[#4CB729] shrink-0">Friends</span>
-                    ) : match.friendshipStatus === 'pending' ? (
-                      <span className="text-xs font-semibold text-[#D97706] shrink-0">
-                        {match.direction === 'incoming' ? 'Requested you' : 'Pending'}
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void handleSendFriendRequest(match.uid)}
-                        className="min-h-[38px] px-3 py-1.5 rounded-lg bg-[#4CB729] hover:bg-[#3FA31F] text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
-                      >
-                        <UserPlus className="w-3.5 h-3.5" />
-                        <span>Add Friend</span>
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {incomingRequests.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-[#2D2B35]">
-                Incoming Friend Requests ({incomingRequests.length})
-              </div>
-              <div className="divide-y divide-[#E8DFC5] rounded-xl border border-[#E8DFC5] px-3">
-                {incomingRequests.map((reqItem) => (
-                  <div
-                    key={reqItem.friendshipId}
-                    className="py-3 flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-[#2D2B35] truncate">
-                        {reqItem.displayName}
-                      </div>
-                      <div className="text-[11px] font-mono text-[#6E6978] truncate">
-                        @{reqItem.username}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => void handleFriendAction(reqItem.friendshipId, 'accept')}
-                        className="min-h-[38px] px-3 py-1.5 rounded-lg bg-[#4CB729] hover:bg-[#3FA31F] text-white text-xs font-semibold inline-flex items-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Accept</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleFriendAction(reqItem.friendshipId, 'decline')}
-                        className="min-h-[38px] px-3 py-1.5 rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] text-xs font-semibold text-[#2D2B35]"
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {acceptedFriends.length > 0 ? (
-            <div className="divide-y divide-[#E8DFC5]">
-              {acceptedFriends.map((fr) => (
-                <div key={fr.friendshipId} className="py-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {fr.photoURL ? (
-                      <img
-                        src={fr.photoURL}
-                        alt={fr.displayName}
-                        referrerPolicy="no-referrer"
-                        className="w-9 h-9 rounded-full object-cover border border-[#E8DFC5] shrink-0"
-                      />
-                    ) : (
-                      <span className="w-9 h-9 rounded-full bg-[#3A3535] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                        {fr.displayName.slice(0, 1).toUpperCase()}
-                      </span>
-                    )}
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-[#2D2B35] truncate">
-                        {fr.displayName}
-                      </div>
-                      <div className="text-xs font-mono text-[#6E6978] truncate">
-                        @{fr.username} · {fr.distinctPotholeCount} distinct · {fr.evidenceCount}{' '}
-                        evidence
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleFriendAction(fr.friendshipId, 'remove')}
-                    aria-label={`Remove ${fr.username}`}
-                    className="min-w-[38px] min-h-[38px] flex items-center justify-center rounded-lg border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#DC2626]/10 text-[#6E6978] hover:text-[#DC2626] shrink-0"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-4 text-xs text-[#6E6978]">
-              No accepted friends yet. Search by username above to send your first request.
-            </div>
-          )}
-
-          {outgoingRequests.length > 0 && (
-            <div className="text-xs text-[#6E6978]">
-              Outgoing requests pending:{' '}
-              {outgoingRequests.map((o) => `@${o.username}`).join(', ')}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Personal Pothole & Evidence Collection */}
-      {user && (
-        <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-              Your Pothole Submissions ({submissions.length})
-            </h2>
-            <span className="text-xs text-[#6E6978]">Live Personal Collection</span>
-          </div>
-
-          {loadingSubmissions ? (
-            <div className="text-sm text-[#6E6978] py-4">Loading submission history...</div>
-          ) : submissions.length === 0 ? (
-            <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-5 text-xs text-[#6E6978]">
-              You have not submitted any pothole photographs yet.
-            </div>
-          ) : (
-            <div className="divide-y divide-[#E8DFC5]">
-              {submissions.map((sub) => (
-                <div key={sub.submissionId} className="py-3 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src={sub.photoUrl}
-                      alt={sub.streetName}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded-xl object-cover border border-[#E8DFC5] shrink-0 bg-[#F7F7F8]"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-[#2D2B35] truncate">
-                        {sub.streetName}
-                      </div>
-                      <div className="text-xs text-[#6E6978] truncate">
-                        {COORDINATE_SOURCE_LABELS[sub.coordinateSource]} ·{' '}
-                        {sub.duplicateStatus === 'distinct'
-                          ? 'Distinct Spot'
-                          : sub.duplicateStatus === 'evidence_added'
-                            ? 'Evidence Added'
-                            : 'Pending Duplicate Review'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-xs font-mono text-[#6E6978] shrink-0">
-                    {sub.aiSeverityLabel}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Phase 3 Infrastructure Readout */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-            Platform Service Verification
-          </h2>
-          <ShieldCheck className="w-5 h-5 text-[#4CB729]" />
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-          <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-3.5 space-y-1">
-            <div className="flex items-center gap-2 font-semibold text-[#2D2B35]">
-              <Database className="w-4 h-4 text-[#4CB729]" />
-              <span>Firestore Boot Probe</span>
-            </div>
-            <div className="text-[#4B4646]">
-              {firestoreStatus ? firestoreStatus.message : 'Checking connection...'}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-[#F7F7F8] border border-[#E8DFC5] p-3.5 space-y-1">
-            <div className="flex items-center gap-2 font-semibold text-[#2D2B35]">
-              <HardDrive className="w-4 h-4 text-[#4CB729]" />
-              <span>Express Media, Maps & Admin SDK</span>
-            </div>
-            <div className="font-mono text-[#4B4646] truncate">
-              {serverHealth
-                ? `${serverHealth.firebaseProjectId ?? 'No project'} · Admin DB: ${
-                    serverHealth.adminFirestoreReady ? 'Ready' : 'Pending'
-                  } · Maps: ${serverHealth.mapsConfigured ? 'Ready' : 'Unset'}`
-                : 'Checking /api/health...'}
-            </div>
-          </div>
-        </div>
-
-        {user && (
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E8DFC5]">
-            <div className="text-xs font-mono text-[#4B4646]">
-              ID Token Verification: {tokenSessionStatus}
-            </div>
-            <button
-              type="button"
-              onClick={() => void verifyBackendToken()}
-              className="min-h-[44px] px-4 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-xs font-semibold text-[#2D2B35]"
-            >
-              Verify Backend Session
-            </button>
-          </div>
-        )}
-      </section>
-
-      {/* Privacy Policy & Account Deletion Controls */}
-      <section className="bg-white rounded-2xl border border-[#E8DFC5] p-5 sm:p-6 space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="font-display text-lg font-bold text-[#2D2B35]">
-            Location Privacy & Data Controls
-          </h2>
-          <ShieldCheck className="w-5 h-5 text-[#6E6978]" />
-        </div>
-
-        <p className="text-xs text-[#4B4646] leading-relaxed">
-          PatchUp requests GPS location only on demand when you initiate Capture or tap Locate Me—no
-          background location tracking ever runs. Email addresses remain strictly inside your private
-          owner-only subcollection and are never published to leaderboards, feeds, or public profiles.
-        </p>
-
-        {user && (
-          <div className="pt-2 border-t border-[#E8DFC5] space-y-3">
-            {!showDeleteConfirm ? (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xs text-[#6E6978]">
-                  Delete your personal profile, private account, friendships, and game records.
-                  Accepted street potholes stay anonymized so corridor reports remain accurate.
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeleteError(null);
-                    setShowDeleteConfirm(true);
-                  }}
-                  className="min-h-[44px] px-4 py-2 rounded-xl border border-[#DC2626]/40 bg-[#DC2626]/5 hover:bg-[#DC2626]/10 text-xs font-semibold text-[#DC2626] inline-flex items-center gap-1.5 whitespace-nowrap"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Delete Account & Personal Data</span>
-                </button>
-              </div>
-            ) : (
-              <form
-                onSubmit={(e) => void handleDeleteAccount(e)}
-                className="rounded-xl bg-[#DC2626]/5 border border-[#DC2626]/30 p-4 space-y-3"
-              >
-                <div className="text-xs font-semibold text-[#DC2626]">
-                  Confirm Permanent Account Deletion
-                </div>
-                <p className="text-xs text-[#4B4646]">
-                  Type <span className="font-mono font-bold text-[#2D2B35]">DELETE</span> below to
-                  permanently delete your PatchUp account, private email record, notifications, and
-                  minigame stats.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
-                    value={deleteConfirmInput}
-                    onChange={(e) => setDeleteConfirmInput(e.target.value)}
-                    placeholder="Type DELETE"
-                    className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DC2626]/40 bg-white text-sm font-mono text-[#2D2B35] focus:outline-2 focus:outline-[#DC2626]"
-                  />
-                  <button
-                    type="submit"
-                    disabled={deletingAccount || deleteConfirmInput.trim() !== 'DELETE'}
-                    className="min-h-[44px] px-4 py-2 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white text-xs font-semibold disabled:opacity-50"
-                  >
-                    {deletingAccount ? 'Deleting...' : 'Confirm Deletion'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowDeleteConfirm(false);
-                      setDeleteConfirmInput('');
-                      setDeleteError(null);
-                    }}
-                    className="min-h-[44px] px-4 py-2 rounded-xl border border-[#E8DFC5] bg-white text-xs font-semibold text-[#2D2B35]"
-                  >
-                    Cancel
-                  </button>
-                </div>
-                {deleteError && <p className="text-xs text-[#DC2626]">{deleteError}</p>}
-              </form>
-            )}
-          </div>
-        )}
-      </section>
+      </details>}
     </div>
   );
 };
