@@ -18,3 +18,6 @@ export function exportRows(ids: string[], records: Record<string,unknown>[]): (s
   ids.forEach((id,i)=>{const p=records[i];if(!isIndependentRecord(p)||!['accepted','reported','acknowledged','repaired'].includes(String(p.status))||typeof p.streetName!=='string'||!p.streetName.trim()||typeof p.lat!=='number'||typeof p.lng!=='number'||!Number.isFinite(p.lat)||!Number.isFinite(p.lng)||Math.abs(p.lat)>90||Math.abs(p.lng)>180)throw new Error('Report contains an unverified location record.');rows.push([id,p.streetName,p.lat,p.lng,String(p.streetSource)]);});
   return rows;
 }
+
+export const NEW_REPORT_GROUP_VERSION = 'private-report-v2';
+export function isNewReportGroup(record: Record<string,unknown> | undefined): boolean { return record?.reportGroupVersion === NEW_REPORT_GROUP_VERSION; }

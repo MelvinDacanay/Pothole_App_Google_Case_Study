@@ -6,7 +6,7 @@ export function buildReportDraft(report: Record<string, unknown>, potholes: Reco
   const warnings: string[] = [];
   if (!street) warnings.push('Street name missing.');
   if (ids.length < 5) warnings.push('Fewer than five distinct snapshot potholes.');
-  if (ids.length > 5) warnings.push('This snapshot contains more than five potholes; review remaining evidence in Community Reports.');
+  if (ids.length > 5) warnings.push('This snapshot contains more than five potholes; review remaining evidence in Admin Hub.');
   if (report.jurisdiction !== 'atldot') warnings.push('City maintenance jurisdiction has not been established.');
   if (!sender || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(sender)) warnings.push('Configure PATCHUP_REPORT_FROM_EMAIL before delivery.');
   const usedMedia = new Set<string>();

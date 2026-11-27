@@ -229,3 +229,41 @@ test('real local Firestore emulator: stale admin claims and enrollment cannot gr
     await deleteApp(app);
   }
 });
+
+test('real local Firestore emulator: ordinary notices remain readable; agency notices and raw potholes stay private', {skip:!safe?'Start a loopback-only Firestore emulator first.':false}, async()=>{
+  const id=randomUUID().replaceAll('-',''),uid=`u_${id}`;
+  const app=initializeApp({projectId:'demo-patchup-verification'},`private-${id}`),db=getFirestore(app);
+  const clientApp=initClientApp({projectId:'demo-patchup-verification',apiKey:'fake-key'},`private-client-${id}`),clientDb=getClientFirestore(clientApp);
+  const [h,port]=host.split(':');connectFirestoreEmulator(clientDb,h,Number(port),{mockUserToken:{sub:uid,email:'test@example.test',email_verified:true}});
+  try {
+    const notices=db.collection('notifications').doc(uid).collection('items');
+    await Promise.all([notices.doc('social').set({uid,type:'friend_request'}),notices.doc('agency').set({uid,type:'report_status',body:'agency case'}),notices.doc('repair').set({uid,type:'confirmed_repair'}),db.collection('potholes').doc(id).set({primaryContributorUid:uid,status:'reported',reportId:'secret'}),db.collection('reports').doc(id).set({status:'submitted'})]);
+    const {collection,query,where,getDocs}=await import('firebase/firestore');
+    const visible=await getDocs(query(collection(clientDb,'notifications',uid,'items'),where('uid','==',uid),where('type','in',['friend_request','friend_accepted','badge_unlocked','leaderboard_milestone'])));
+    assert.deepEqual(visible.docs.map(d=>d.id),['social']);
+    assert.equal((await clientGetDoc(clientDoc(clientDb,'notifications',uid,'items','social'))).exists(),true);
+    for(const key of ['agency','repair'])await assert.rejects(clientGetDoc(clientDoc(clientDb,'notifications',uid,'items',key)),(err:{code?:string})=>err.code==='permission-denied');
+    for(const col of ['potholes','reports'])await assert.rejects(clientGetDoc(clientDoc(clientDb,col,id)),(err:{code?:string})=>err.code==='permission-denied');
+  } finally {await deleteClientApp(clientApp);await db.terminate();await deleteApp(app);}
+});
+
+test('real local Firestore emulator: five independently located potholes generate a private report without older data or user notices', {skip:!safe?'Start a loopback-only Firestore emulator first.':false}, async()=>{
+  const {evaluateSegmentMembershipAndThreshold}=await import('../server/segments.ts');
+  const {LOCATION_POLICY_VERSION,NEW_REPORT_GROUP_VERSION}=await import('../server/locationPolicy.ts');
+  const id=randomUUID().replaceAll('-',''),uid=`u_${id}`,street=`Test ${id.slice(0,8)} St`,normalizedStreet=street.toLowerCase();
+  const app=initializeApp({projectId:'demo-patchup-verification'},`draft-${id}`),db=getFirestore(app);
+  const prior=process.env.PATCHUP_LOCATION_HISTORY_AUDITED;process.env.PATCHUP_LOCATION_HISTORY_AUDITED='false';
+  try {
+    await db.collection('streetSegments').doc(`old_${id}`).set({streetName:street,normalizedStreet,status:'active',jurisdiction:'atldot',anchorLat:33.75,anchorLng:-84.39,currentCycleDistinctCount:99});
+    const ids=Array.from({length:5},(_,i)=>`pot_${id}_${i}`);
+    let reportId='';
+    for(let i=0;i<ids.length;i++){
+      await db.collection('potholes').doc(ids[i]).set({streetName:street,normalizedStreet,formattedAddress:street,city:'Atlanta',state:'GA',lat:33.75+i*0.0003,lng:-84.39,coordinateSource:'manual_pin',streetSource:'user_observed',locationPolicyVersion:LOCATION_POLICY_VERSION,jurisdiction:'atldot',status:'accepted',verificationStatus:'accepted',primaryContributorUid:uid,primaryMediaId:`med_${id}_${i}`});
+      const result=await evaluateSegmentMembershipAndThreshold(db,ids[i]);assert.equal(result.reportCreated,i===4);if(i===4)reportId=result.reportId!;
+    }
+    const report=(await db.collection('reports').doc(reportId).get()).data()!;
+    assert.equal(report.reportGroupVersion,NEW_REPORT_GROUP_VERSION);assert.equal(report.status,'awaiting_admin_review');assert.deepEqual([...report.snapshotPotholeIds].sort(),ids);assert.notEqual(report.segmentId,`old_${id}`);
+    assert.equal((await db.collection('notifications').doc(uid).collection('items').get()).empty,true);
+    assert.equal((await evaluateSegmentMembershipAndThreshold(db,ids[4])).reportCreated,false);
+  } finally {if(prior===undefined)delete process.env.PATCHUP_LOCATION_HISTORY_AUDITED;else process.env.PATCHUP_LOCATION_HISTORY_AUDITED=prior;await db.terminate();await deleteApp(app);}
+});

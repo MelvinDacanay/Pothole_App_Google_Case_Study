@@ -19,7 +19,6 @@ import { useActivityFeed, useFriends, useNotifications } from '../hooks/useSocia
 import {
   loadMapsClientConfig,
   MapsClientConfig,
-  POTHOLE_STATUS_LABELS,
   PotholeRecord,
 } from '../lib/maps';
 import { NavTab } from '../components/AppShell';
@@ -77,7 +76,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <span className="page-banner-index">FOUND A POTHOLE?</span>
           <h1>TAKE A PHOTO.<br /><em>WE’LL HANDLE<br />THE REST.</em></h1>
           <p>
-            PatchUp verifies the image, captures the location, checks nearby reports, and puts the
+            PatchUp verifies the image, captures the location, checks nearby potholes, and puts the
             result on the map.
           </p>
           <button type="button" onClick={() => onNavigate('capture')} className="home-snap-action">
@@ -89,7 +88,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <div className="home-live-map">
           <div className="home-map-label">
             <span>LIVE ATLANTA STREET MAP</span>
-            <strong>{loading ? '—' : potholes.length} reports</strong>
+            <strong>{loading ? '—' : potholes.length} potholes</strong>
           </div>
           <AtlantaMap
             mapsConfig={mapsConfig}
@@ -227,7 +226,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       </span>
                       <span className="community-polaroid-identity">
                         <strong>@{item.primaryContributorUsername}</strong>
-                        <small>{POTHOLE_STATUS_LABELS[item.status] ?? item.status}</small>
                       </span>
                     </span>
                   </span>

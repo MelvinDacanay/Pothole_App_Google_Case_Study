@@ -16,7 +16,6 @@ import {
   COORDINATE_SOURCE_LABELS,
   dispatchMapsQuotaWarning,
   MapsClientConfig,
-  POTHOLE_STATUS_LABELS,
   PotholeRecord,
 } from '../lib/maps';
 
@@ -30,7 +29,7 @@ interface AtlantaMapProps {
 
 function createPinElement(pothole: PotholeRecord, isSelected: boolean): HTMLDivElement {
   return createPotholePin(
-    `${pothole.streetName} (${POTHOLE_STATUS_LABELS[pothole.status] ?? pothole.status}), ${pothole.evidenceCount} evidence`,
+    `${pothole.streetName}, ${pothole.evidenceCount} evidence`,
     isSelected
   );
 }
@@ -131,7 +130,6 @@ const ClusteredPotholeMarkers: React.FC<{
       <div className="p-1 space-y-1.5 text-[#2D2B35]">
         <div className="text-xs font-bold leading-snug">{selectedPothole.streetName}</div>
         <div className="text-[11px] text-[#6E6978]">
-          {POTHOLE_STATUS_LABELS[selectedPothole.status] ?? selectedPothole.status} ·{' '}
           {COORDINATE_SOURCE_LABELS[selectedPothole.coordinateSource]}
         </div>
         <div className="text-[11px] font-mono text-[#4B4646] tabular-nums">
