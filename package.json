@@ -11,7 +11,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "lint:rules": "eslint firestore.rules",
-    "test": "node --test --experimental-strip-types tests/production.test.ts tests/verification.test.ts tests/admin-draft.test.ts tests/atldot-policy.test.ts tests/admin-hub.test.ts tests/photo-privacy.test.ts tests/admin-authorization.test.ts",
+    "test": "node --test --experimental-strip-types tests/production.test.ts tests/verification.test.ts tests/admin-draft.test.ts tests/atldot-policy.test.ts tests/admin-hub.test.ts tests/photo-privacy.test.ts tests/admin-authorization.test.ts tests/google-geocoding.test.ts",
     "benchmark": "node --experimental-strip-types scripts/benchmark.ts",
     "test:emulator": "node --test --experimental-strip-types tests/verification.emulator.test.ts",
     "media:migrate": "node --experimental-strip-types scripts/migrate-media.ts"

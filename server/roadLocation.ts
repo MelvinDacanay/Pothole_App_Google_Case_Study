@@ -1,11 +1,12 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { isWithinAtlantaMetro, normalizeStreetName, classifyJurisdiction, type JurisdictionType } from './geo.ts';
+import { googleGeocodingEnabled, type GoogleStreet } from './googleGeocoding.ts';
 import { hashBytes } from './verificationPolicy.ts';
 
 // City of Atlanta open-data street centerline layer. Optional until the team has confirmed
 // permitted use and availability. Never send a user identifier, photograph or notes here.
 export const CITY_ROAD_URL='https://gis.atlantaga.gov/dpcd/rest/services/OpenDataService1/FeatureServer/33/query';
-export type StreetSource='city_centerline'|'user_observed';
+export type StreetSource='city_centerline'|'user_observed'|'google_geocoding';
 export type RoadMatch={streetName:string;jurisdiction:JurisdictionType;streetSource:'city_centerline'};
 export function cleanObservedStreet(value:unknown):string {
   if(typeof value!=='string')return '';
@@ -61,13 +62,20 @@ export async function lookupCityRoad(db:Firestore,uid:string,lat:number,lng:numb
     return match;
   }catch{return null;}
 }
+export async function saveGoogleRoad(db:Firestore,uid:string,lat:number,lng:number,match:GoogleStreet,jurisdiction:JurisdictionType='unknown') {
+  if (!googleGeocodingEnabled()) throw new Error('Google location lookup disabled.');
+  await refFor(db,uid,lat,lng).set({...match,jurisdiction,streetSource:'google_geocoding',ownerId:uid,expiresAt:Timestamp.fromMillis(Date.now()+15*60_000)});
+  return {...match,jurisdiction,streetSource:'google_geocoding' as const};
+}
 export async function confirmRoad(db:Firestore,uid:string,lat:number,lng:number,street:unknown,source:unknown) {
   const streetName=cleanObservedStreet(street);if(!streetName)throw new Error('Enter the street name from a street sign or your own knowledge, not a home address.');
   let match: {streetName:string;jurisdiction:JurisdictionType;streetSource:StreetSource}={streetName,jurisdiction:classifyJurisdiction(streetName,'','')==='gdot'?'gdot':'unknown',streetSource:'user_observed'};
-  if(source==='city_centerline'){
+  if(source==='city_centerline'||source==='google_geocoding'){
+    if(source==='google_geocoding'&&!googleGeocodingEnabled())throw new Error('Google location lookup disabled. Refresh or independently enter the road name.');
     const proof=(await refFor(db,uid,lat,lng).get()).data();
-    if(!proof||proof.ownerId!==uid||!(Number(proof.expiresAt?.toMillis?.())>Date.now())||normalizeStreetName(proof.streetName)!==normalizeStreetName(streetName)||!['atldot','gdot','unknown'].includes(proof.jurisdiction))throw new Error('Street lookup expired. Refresh the location or enter the street name yourself.');
-    match={streetName:proof.streetName,jurisdiction:proof.jurisdiction,streetSource:'city_centerline'};
+    if(!proof||proof.streetSource!==source||proof.ownerId!==uid||!(Number(proof.expiresAt?.toMillis?.())>Date.now())||normalizeStreetName(proof.streetName)!==normalizeStreetName(streetName)||!['atldot','gdot','unknown'].includes(proof.jurisdiction))throw new Error('Street lookup expired. Refresh the location or enter the street name yourself.');
+    match={streetName:proof.streetName,jurisdiction:proof.jurisdiction,streetSource:source};
+    if(source==='google_geocoding')return {...match,normalizedStreet:normalizeStreetName(match.streetName),formattedAddress:proof.formattedAddress||match.streetName,city:proof.city||'Atlanta',state:'GA',neighborhood:'',postalCode:proof.postalCode||'',placeId:proof.placeId||''};
   }else if(source!=='user_observed')throw new Error('Confirm the source of the street name.');
   return {...match,normalizedStreet:normalizeStreetName(match.streetName),formattedAddress:`${match.streetName}, Atlanta, GA`,city:'Atlanta',state:'GA',neighborhood:'',postalCode:'',placeId:''};
 }
