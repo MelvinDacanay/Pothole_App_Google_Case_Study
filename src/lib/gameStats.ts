@@ -1,6 +1,13 @@
 import { type User } from 'firebase/auth';
 
-export type MinigameId = 'pothole_repair' | 'pothole_runner';
+export const MINIGAME_IDS = [
+  'pothole_repair',
+  'pothole_runner',
+  'crater_blitz',
+  'connector_cruise',
+] as const;
+
+export type MinigameId = (typeof MINIGAME_IDS)[number];
 
 export interface LocalGameStat {
   highScore: number;
@@ -27,10 +34,23 @@ const DEFAULT_STAT: LocalGameStat = {
   pendingSync: null,
 };
 
+function minDurationForGame(gameId: MinigameId): number {
+  if (gameId === 'crater_blitz') return 5000;
+  if (gameId === 'pothole_repair') return 2500;
+  return 1500;
+}
+
+function isJsonResponse(res: Response): boolean {
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  return /\bapplication\/(?:[\w.-]+\+)?json\b/.test(contentType);
+}
+
 export function createEmptyGameStats(): GameStatsMap {
   return {
     pothole_repair: { ...DEFAULT_STAT },
     pothole_runner: { ...DEFAULT_STAT },
+    crater_blitz: { ...DEFAULT_STAT },
+    connector_cruise: { ...DEFAULT_STAT },
   };
 }
 
@@ -41,7 +61,7 @@ export function loadLocalGameStats(): GameStatsMap {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return empty;
     const parsed = JSON.parse(raw) as Partial<Record<MinigameId, Partial<LocalGameStat>>>;
-    for (const id of ['pothole_repair', 'pothole_runner'] as const) {
+    for (const id of MINIGAME_IDS) {
       const entry = parsed[id];
       if (!entry || typeof entry !== 'object') continue;
       empty[id] = {
@@ -57,7 +77,10 @@ export function loadLocalGameStats(): GameStatsMap {
           Number.isFinite(Number(entry.pendingSync.durationMs))
             ? {
                 score: Math.max(0, Math.round(Number(entry.pendingSync.score))),
-                durationMs: Math.max(1500, Math.round(Number(entry.pendingSync.durationMs))),
+                durationMs: Math.max(
+                  minDurationForGame(id),
+                  Math.round(Number(entry.pendingSync.durationMs))
+                ),
               }
             : null,
       };
@@ -83,7 +106,7 @@ export function recordLocalGameRun(
   durationMs: number
 ): GameStatsMap {
   const cleanScore = Math.max(0, Math.round(score));
-  const cleanDuration = Math.max(gameId === 'pothole_repair' ? 2500 : 1500, Math.round(durationMs));
+  const cleanDuration = Math.max(minDurationForGame(gameId), Math.round(durationMs));
   const current = loadLocalGameStats();
   const prev = current[gameId];
   const isNewHigh = cleanScore > prev.highScore;
@@ -128,11 +151,11 @@ export async function syncGameScoreWithServer(
       body: JSON.stringify({
         gameId,
         score: Math.max(0, Math.round(score)),
-        durationMs: Math.max(gameId === 'pothole_repair' ? 2500 : 1500, Math.round(durationMs)),
+        durationMs: Math.max(minDurationForGame(gameId), Math.round(durationMs)),
       }),
     });
 
-    if (!res.ok) {
+    if (!res.ok || !isJsonResponse(res)) {
       return localUpdated;
     }
 
@@ -169,7 +192,7 @@ export async function reconcileGameStatsFromServer(user: User): Promise<GameStat
     const token = await user.getIdToken();
 
     // Flush any queued offline personal-best run first
-    for (const id of ['pothole_repair', 'pothole_runner'] as const) {
+    for (const id of MINIGAME_IDS) {
       const pending = current[id].pendingSync;
       if (pending) {
         const postRes = await fetch('/api/games/score', {
@@ -184,7 +207,7 @@ export async function reconcileGameStatsFromServer(user: User): Promise<GameStat
             durationMs: pending.durationMs,
           }),
         });
-        if (postRes.ok) {
+        if (postRes.ok && isJsonResponse(postRes)) {
           current[id].pendingSync = null;
           current[id].synced = true;
         }
@@ -196,7 +219,7 @@ export async function reconcileGameStatsFromServer(user: User): Promise<GameStat
         Authorization: `Bearer ${token}`,
       },
     });
-    if (!res.ok) {
+    if (!res.ok || !isJsonResponse(res)) {
       saveLocalGameStats(current);
       return current;
     }
@@ -215,7 +238,7 @@ export async function reconcileGameStatsFromServer(user: User): Promise<GameStat
       >;
     };
 
-    for (const id of ['pothole_repair', 'pothole_runner'] as const) {
+    for (const id of MINIGAME_IDS) {
       const remote = payload.stats?.[id];
       if (!remote) continue;
       current[id] = {

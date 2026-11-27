@@ -10,6 +10,7 @@ import {
 } from '@vis.gl/react-google-maps';
 import { MapPin } from 'lucide-react';
 import { ATLANTA_CENTER, dispatchMapsQuotaWarning, MapsClientConfig } from '../lib/maps';
+import { createPotholePin } from '../lib/potholePin';
 
 interface PinPickerMapProps {
   mapsConfig: MapsClientConfig;
@@ -35,21 +36,7 @@ const DraggablePinController: React.FC<{
   useEffect(() => {
     if (!map || !markerLib) return;
 
-    const pinBadge = document.createElement('div');
-    pinBadge.style.width = '34px';
-    pinBadge.style.height = '34px';
-    pinBadge.style.borderRadius = '9999px';
-    pinBadge.style.backgroundColor = '#4CB729';
-    pinBadge.style.border = '3px solid #2D2B35';
-    pinBadge.style.color = '#FFFFFF';
-    pinBadge.style.display = 'flex';
-    pinBadge.style.alignItems = 'center';
-    pinBadge.style.justifyContent = 'center';
-    pinBadge.style.fontFamily = '"JetBrains Mono", monospace';
-    pinBadge.style.fontSize = '13px';
-    pinBadge.style.fontWeight = '700';
-    pinBadge.style.boxShadow = '0 4px 12px rgba(0,0,0,0.32)';
-    pinBadge.textContent = '+';
+    const pinBadge = createPotholePin('Drag to refine pothole location');
 
     const marker = new markerLib.AdvancedMarkerElement({
       map,
@@ -57,6 +44,8 @@ const DraggablePinController: React.FC<{
       gmpDraggable: true,
       title: 'Drag or tap map to refine pothole location',
       content: pinBadge,
+      anchorLeft: '-50%',
+      anchorTop: '-50%',
     });
 
     marker.addListener('dragend', () => {
@@ -140,7 +129,7 @@ export const PinPickerMap: React.FC<PinPickerMapProps> = ({
         </APIProvider>
       </div>
       <div className="px-3.5 py-2 bg-[#F7F7F8] border-t border-[#E8DFC5] text-[11px] text-[#6E6978] flex items-center justify-between gap-2">
-        <span>Tap anywhere on the map or drag the green pin to align the exact crater.</span>
+        <span>Tap anywhere on the map or drag the pothole pin to align the exact pothole.</span>
         <span className="font-mono tabular-nums shrink-0">
           {activeCoords.lat.toFixed(5)}, {activeCoords.lng.toFixed(5)}
         </span>

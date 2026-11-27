@@ -12,6 +12,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { readApiJson } from '../lib/apiResponse';
 
 export interface FriendItem {
   friendshipId: string;
@@ -31,6 +32,7 @@ export interface FriendSearchUser {
   username: string;
   displayName: string;
   photoURL?: string;
+  bio?: string;
   distinctPotholeCount: number;
   evidenceCount: number;
   homeNeighborhood?: string;
@@ -79,10 +81,12 @@ export interface AchievementBadgeRecord {
 export function useFriends(user: User | null) {
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refreshFriends = useCallback(async () => {
     if (!user) {
       setFriends([]);
+      setError(null);
       return;
     }
     setLoading(true);
@@ -91,12 +95,13 @@ export function useFriends(user: User | null) {
       const res = await fetch('/api/friends', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = (await res.json()) as { items?: FriendItem[] };
-      if (res.ok && Array.isArray(data.items)) {
-        setFriends(data.items);
-      }
-    } catch {
-      // Preserve current state on transient failure
+      const data = await readApiJson<{ items?: FriendItem[] }>(res);
+      if (!Array.isArray(data.items)) throw new Error('The server returned an invalid friends list.');
+      setFriends(data.items);
+      setError(null);
+    } catch (err) {
+      // Preserve the last known list, but do not disguise a backend outage as an empty account.
+      setError(err instanceof Error ? err.message : 'Unable to load friends. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -141,8 +146,7 @@ export function useFriends(user: User | null) {
       },
       body: JSON.stringify({ targetUid }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Unable to send friend request.');
+    const data = await readApiJson<{ ok: boolean; friendshipId: string; status: string }>(res);
     await refreshFriends();
     return data as { ok: boolean; friendshipId: string; status: string };
   };
@@ -161,21 +165,21 @@ export function useFriends(user: User | null) {
       },
       body: JSON.stringify({ friendshipId, action }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Unable to update friendship.');
+    const data = await readApiJson<{ ok: boolean }>(res);
     await refreshFriends();
     return data;
   };
 
-  const searchUsers = async (queryText: string): Promise<FriendSearchUser[]> => {
-    if (!user || queryText.trim().length < 2) return [];
+  const searchUsers = useCallback(async (queryText: string, recommendations = false): Promise<FriendSearchUser[]> => {
+    if (!user || (!recommendations && !queryText.trim())) return [];
     const token = await user.getIdToken();
-    const res = await fetch(`/api/friends/search?q=${encodeURIComponent(queryText.trim())}`, {
+    const res = await fetch(`/api/friends/search?q=${encodeURIComponent(queryText.trim())}&recommendations=${recommendations}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const data = (await res.json()) as { users?: FriendSearchUser[] };
-    return res.ok && Array.isArray(data.users) ? data.users : [];
-  };
+    const data = await readApiJson<{ users?: FriendSearchUser[] }>(res);
+    if (!Array.isArray(data.users)) throw new Error('The server returned invalid Patcher search results.');
+    return data.users;
+  }, [user]);
 
   const acceptedFriends = friends.filter((f) => f.status === 'accepted');
   const incomingRequests = friends.filter(
@@ -191,6 +195,7 @@ export function useFriends(user: User | null) {
     incomingRequests,
     outgoingRequests,
     loading,
+    error,
     refreshFriends,
     sendFriendRequest,
     respondToFriend,
@@ -274,40 +279,7 @@ export function useActivityFeed() {
   const [events, setEvents] = useState<ActivityFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!db) {
-      setLoading(false);
-      setEvents([]);
-      return;
-    }
-
-    const q = query(
-      collection(db, 'activityFeed'),
-      where('visibility', '==', 'public'),
-      limit(40)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const items = snap.docs
-          .map((d) => d.data() as ActivityFeedItem)
-          .sort((a, b) => {
-            const aMs = a.createdAt?.toMillis?.() ?? 0;
-            const bMs = b.createdAt?.toMillis?.() ?? 0;
-            return bMs - aMs;
-          });
-        setEvents(items);
-        setLoading(false);
-      },
-      (err) => {
-        setLoading(false);
-        handleFirestoreError(err, OperationType.LIST, 'activityFeed');
-      }
-    );
-
-    return () => unsub();
-  }, []);
+  useEffect(()=>{let active=true;const load=async()=>{if(document.visibilityState==='hidden')return;try{const r=await fetch('/api/community/activity');if(!r.ok)throw new Error();const d=await r.json();if(active)setEvents(d.items||[]);}catch{/* retry on next refresh */}finally{if(active)setLoading(false);}};void load();const timer=window.setInterval(load,60000);return()=>{active=false;window.clearInterval(timer);};},[]);
 
   return { events, loading };
 }

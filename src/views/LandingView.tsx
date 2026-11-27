@@ -8,7 +8,6 @@ import {
   Play,
 } from 'lucide-react';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
-import { LandingCaptureModal } from '../components/LandingCaptureModal';
 import { useAuth } from '../context/AuthContext';
 
 const IMPACT_SLIDES = [
@@ -41,8 +40,8 @@ const IMPACT_SLIDES = [
     stat: '1 snap',
     statLabel: 'captures the location, date, and time',
     paragraphs: [
-      'PatchUp turns passive frustration into reliable infrastructure data by making reporting effortless and fun. Patchers snap a photo, earn badges, and climb leaderboards while the platform extracts the exact location, date, and time.',
-      'Every submission runs through an image classifier that verifies the photo actually shows a pothole before it reaches the map. The result is a live, ground-truth layer that static mapping tools miss—especially when local Street View imagery dates to March 2025.',
+      'PatchUp turns passive frustration into reliable infrastructure data by making reporting effortless and fun. Patchers snap a photo, earn badges, and climb leaderboards while the platform records the location supplied through GPS, photo metadata, or a manually confirmed pin.',
+      'Photos are screened by an optional AI check or reviewed by an administrator before they become accepted community records. Uncertain photos remain pending; image analysis alone cannot prove where or when a photo was taken.',
     ],
     sources: 'Method: image classification · photo metadata · coordinate verification',
   },
@@ -50,10 +49,10 @@ const IMPACT_SLIDES = [
     label: 'The handoff',
     title: 'Five reports turn scattered evidence into one clear signal.',
     stat: '5',
-    statLabel: 'verified reports trigger automated routing',
+    statLabel: 'verified reports trigger a draft for administrator review',
     paragraphs: [
       'Once five verified reports land on a single street, PatchUp automatically drafts a consolidated report for the exact authority responsible for that road.',
-      'Instead of forcing residents to navigate jurisdictional boundaries alone, the platform packages verified, timestamped evidence and routes it to the city, county, or state agency that can fix it.',
+      'Instead of forcing residents to navigate jurisdictional boundaries alone, the platform packages accepted evidence for administrator review and eventual submission to the responsible agency.',
     ],
     sources: 'Routing targets: City of Atlanta · Fulton County · DeKalb County · GDOT',
   },
@@ -61,7 +60,6 @@ const IMPACT_SLIDES = [
 
 export const LandingView: React.FC = () => {
   const { authError, isSigningIn, signIn } = useAuth();
-  const [reportOpen, setReportOpen] = useState(false);
   const [impactSlide, setImpactSlide] = useState(0);
   const [impactAutoplay, setImpactAutoplay] = useState(
     () => !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -100,32 +98,23 @@ export const LandingView: React.FC = () => {
             <div>
               <p className="cover-eyebrow">Atlanta, your block is calling.</p>
               <h1>SEE IT.<br />SNAP IT.<br /><em>PATCH IT.</em></h1>
+              <div className="cover-actions cover-join-action">
+                <GoogleSignInButton
+                  onClick={() => void signIn()}
+                  disabled={isSigningIn}
+                  label="Join with Google"
+                />
+                <div className="landing-promise">
+                  <Camera className="w-4 h-4" />
+                  <span>One photo is all it takes</span>
+                </div>
+              </div>
             </div>
             <p className="cover-deck">
               Turn Atlanta’s worst roads into a neighborhood scoreboard. Snap photos of the
               potholes you find, rack up badges against your friends, and once a street hits five
               reports, we'll put it straight on the city's radar.
             </p>
-
-            <div className="cover-actions">
-              <button
-                type="button"
-                className="landing-report-btn"
-                onClick={() => setReportOpen(true)}
-              >
-                <Camera className="w-4 h-4" />
-                <span>Report a pothole</span>
-              </button>
-              <GoogleSignInButton
-                onClick={() => void signIn()}
-                disabled={isSigningIn}
-                label="Sign in"
-              />
-            </div>
-            <div className="landing-promise">
-              <Camera className="w-4 h-4" />
-              <span>Start now — no account needed to snap</span>
-            </div>
 
             {authError && <p className="landing-auth-error">{authError}</p>}
           </div>
@@ -146,15 +135,15 @@ export const LandingView: React.FC = () => {
         </section>
 
         <div className="news-ticker" aria-label="How PatchUp works">
-          <span>01 · SPOT THE DAMAGE</span>
-          <span>02 · SNAP THE EVIDENCE</span>
-          <span>03 · VERIFY THE BLOCK</span>
-          <span>04 · MOVE THE CITY</span>
+          <span>SPOT THE DAMAGE</span>
+          <span>SNAP THE EVIDENCE</span>
+          <span>VERIFY THE BLOCK</span>
+          <span>MOVE THE CITY</span>
         </div>
 
         <section className={`mission-grid ${impactAutoplay ? 'is-playing' : ''}`}>
           <div className="mission-intro">
-            <span className="section-index">THE IDEA / 001</span>
+            <span className="section-index">THE IDEA</span>
             <h2>A SMALL ACT<br />WITH <em>STREET-LEVEL</em><br />IMPACT.</h2>
             <div className="impact-rail" aria-label="Impact story progress">
               {IMPACT_SLIDES.map((slide, index) => (
@@ -162,11 +151,10 @@ export const LandingView: React.FC = () => {
                   key={slide.label}
                   type="button"
                   onClick={() => selectImpactSlide(index)}
-                  className={impactSlide === index ? 'is-active' : ''}
+                  className={`!grid-cols-1 [&>span:first-child]:!text-inherit ${impactSlide === index ? 'is-active' : ''}`}
                   aria-label={`Show ${slide.label}`}
                   aria-current={impactSlide === index ? 'step' : undefined}
                 >
-                  <span>0{index + 1}</span>
                   <span>{slide.label}</span>
                 </button>
               ))}
@@ -176,7 +164,6 @@ export const LandingView: React.FC = () => {
           <div className="mission-copy">
             <article className="impact-story" key={impactSlide}>
               <div className="impact-story-meta">
-                <span>0{impactSlide + 1} / 0{IMPACT_SLIDES.length}</span>
                 <span>{IMPACT_SLIDES[impactSlide].label}</span>
               </div>
               <h3>{IMPACT_SLIDES[impactSlide].title}</h3>
@@ -221,22 +208,12 @@ export const LandingView: React.FC = () => {
           </div>
           <div>
             <p>Join your neighbors, document what the city misses, and make every snap count.</p>
-            <div className="cover-actions">
-              <button
-                type="button"
-                className="landing-report-btn"
-                onClick={() => setReportOpen(true)}
-              >
-                <Camera className="w-4 h-4" />
-                <span>Report a pothole</span>
-              </button>
-              <GoogleSignInButton
-                onClick={() => void signIn()}
-                disabled={isSigningIn}
-                label="Sign in"
-              />
-            </div>
-            <span className="landing-signin-note">Snap first · Google account needed to submit</span>
+            <GoogleSignInButton
+              onClick={() => void signIn()}
+              disabled={isSigningIn}
+              label="Join with Google"
+            />
+            <span className="landing-signin-note">Free to join · Google account required</span>
           </div>
           <MapPin className="landing-cta-pin" aria-hidden="true" />
         </section>
@@ -246,8 +223,6 @@ export const LandingView: React.FC = () => {
         <span>PATCHUP · ATLANTA, GEORGIA</span>
         <span>Independent community project · Not affiliated with the City of Atlanta or MARTA</span>
       </footer>
-
-      <LandingCaptureModal isOpen={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );
 };

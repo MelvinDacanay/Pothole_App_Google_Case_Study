@@ -26,12 +26,16 @@ export interface UserPublicProfile {
   username: string;
   displayName: string;
   photoURL?: string;
+  bio?: string;
   homeNeighborhood?: string;
   joinedAt?: Timestamp;
   updatedAt?: Timestamp;
   distinctPotholeCount: number;
   evidenceCount: number;
   unlockedBadgesCount: number;
+  potholesCollectedCount: number;
+  dailyStreak: number;
+  lastCollectedDate?: string;
   showOnLeaderboard: boolean;
   shareNeighborhood: boolean;
 }
@@ -60,6 +64,7 @@ interface AuthContextValue {
     username?: string;
     photoURL?: string;
     homeNeighborhood?: string;
+    bio?: string;
     showOnLeaderboard?: boolean;
     shareNeighborhood?: boolean;
   }) => Promise<void>;
@@ -81,8 +86,8 @@ function buildSafeUsername(user: User): string {
 }
 
 function buildSafeDisplayName(user: User): string {
-  const raw = (user.displayName || user.email?.split('@')[0] || 'Atlanta Contributor').trim();
-  return raw.slice(0, 64) || 'Atlanta Contributor';
+  const raw = (user.displayName || user.email?.split('@')[0] || 'Atlanta Patcher').trim();
+  return raw.slice(0, 64) || 'Atlanta Patcher';
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -117,11 +122,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const firestore = db;
+    const firebaseAuth = auth;
 
     let unsubPublic: (() => void) | null = null;
     let unsubPrivate: (() => void) | null = null;
 
-    const unsubAuth = onAuthStateChanged(auth, async (nextUser) => {
+    const unsubAuth = onAuthStateChanged(firebaseAuth, async (nextUser) => {
       if (unsubPublic) {
         unsubPublic();
         unsubPublic = null;
@@ -143,27 +149,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      setIsAdmin(false);
       try {
-        const tokenResult = await nextUser.getIdTokenResult();
-        let adminActive = Boolean(tokenResult.claims.admin);
-        if (!adminActive && nextUser.emailVerified) {
+        if (nextUser.emailVerified) {
+          const token = await nextUser.getIdToken();
           const bootRes = await fetch('/api/admin/bootstrap', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${tokenResult.token}` },
-          }).catch(() => null);
-          if (bootRes && bootRes.ok) {
-            const bootData = (await bootRes.json()) as { admin?: boolean; claimUpdated?: boolean };
-            if (bootData.admin) {
-              if (bootData.claimUpdated) {
-                await nextUser.getIdToken(true);
-              }
-              adminActive = true;
-            }
-          }
+            method: 'POST', headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+          });
+          const adminActive = bootRes.ok && (await bootRes.json()).admin === true;
+          if (firebaseAuth.currentUser?.uid === nextUser.uid) setIsAdmin(adminActive);
         }
-        setIsAdmin(adminActive);
       } catch {
-        setIsAdmin(false);
+        if (firebaseAuth.currentUser?.uid === nextUser.uid) setIsAdmin(false);
       }
 
       const publicPath = `users/${nextUser.uid}`;
@@ -194,6 +191,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               distinctPotholeCount: 0,
               evidenceCount: 0,
               unlockedBadgesCount: 0,
+              potholesCollectedCount: 0,
+              dailyStreak: 0,
               showOnLeaderboard: true,
               shareNeighborhood: true,
             });
@@ -258,6 +257,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Recheck a signed-in administrator while the app remains open. Server requests
+  // independently enforce authorization even before this presentation refresh.
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+    let active = true;
+    let checking = false;
+    const recheck = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+        const allowed = response.ok && (await response.json()).admin === true;
+        if (active && !allowed) setIsAdmin(false);
+      } catch { if (active) setIsAdmin(false); }
+      finally { checking = false; }
+    };
+    const timer = window.setInterval(() => void recheck(), 60_000);
+    const onFocus = () => void recheck();
+    window.addEventListener('focus', onFocus);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
+  }, [user, isAdmin]);
+
   const signIn = async () => {
     setAuthError(null);
     setIsSigningIn(true);
@@ -282,6 +304,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     username?: string;
     photoURL?: string;
     homeNeighborhood?: string;
+    bio?: string;
     showOnLeaderboard?: boolean;
     shareNeighborhood?: boolean;
   }) => {
@@ -315,6 +338,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (typeof updates.homeNeighborhood === 'string') {
       payload.homeNeighborhood = updates.homeNeighborhood.trim().slice(0, 64);
+    }
+    if (typeof updates.bio === 'string') {
+      payload.bio = updates.bio.trim().slice(0, 160);
     }
 
     if (typeof updates.showOnLeaderboard === 'boolean') {

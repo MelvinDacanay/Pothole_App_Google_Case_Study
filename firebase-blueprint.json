@@ -47,6 +47,18 @@
         "unlockedBadgesCount": {
           "type": "integer"
         },
+        "potholesCollectedCount": {
+          "type": "integer",
+          "description": "Server-maintained count of classifier- or admin-approved pothole photos, including accepted evidence."
+        },
+        "dailyStreak": {
+          "type": "integer",
+          "description": "Consecutive UTC days with at least one approved pothole capture."
+        },
+        "lastCollectedDate": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
         "showOnLeaderboard": {
           "type": "boolean"
         },
@@ -63,6 +75,8 @@
         "distinctPotholeCount",
         "evidenceCount",
         "unlockedBadgesCount",
+        "potholesCollectedCount",
+        "dailyStreak",
         "showOnLeaderboard",
         "shareNeighborhood"
       ]
@@ -95,7 +109,13 @@
           "format": "date-time"
         }
       },
-      "required": ["uid", "email", "notificationsEnabled", "createdAt", "updatedAt"]
+      "required": [
+        "uid",
+        "email",
+        "notificationsEnabled",
+        "createdAt",
+        "updatedAt"
+      ]
     },
     "MediaObject": {
       "title": "MediaObject",
@@ -116,7 +136,11 @@
         },
         "contentType": {
           "type": "string",
-          "enum": ["image/jpeg", "image/png", "image/webp"]
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ]
         },
         "sizeBytes": {
           "type": "integer"
@@ -136,7 +160,16 @@
           "format": "date-time"
         }
       },
-      "required": ["mediaId", "ownerId", "contentType", "sizeBytes", "width", "height", "data", "createdAt"]
+      "required": [
+        "mediaId",
+        "ownerId",
+        "contentType",
+        "sizeBytes",
+        "width",
+        "height",
+        "data",
+        "createdAt"
+      ]
     },
     "StorageVerificationRecord": {
       "title": "StorageVerificationRecord",
@@ -167,7 +200,11 @@
         },
         "contentType": {
           "type": "string",
-          "enum": ["image/jpeg", "image/png", "image/webp"]
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ]
         },
         "sizeBytes": {
           "type": "integer"
@@ -198,42 +235,106 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "lat": { "type": "number" },
-        "lng": { "type": "number" },
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        },
         "coordinateSource": {
           "type": "string",
-          "enum": ["gps_verified", "exif_extracted", "manual_pin"]
+          "enum": [
+            "gps_verified",
+            "exif_extracted",
+            "manual_pin"
+          ]
         },
-        "accuracyMeters": { "type": "number" },
-        "formattedAddress": { "type": "string", "maxLength": 256 },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "normalizedStreet": { "type": "string", "maxLength": 128 },
-        "neighborhood": { "type": "string", "maxLength": 128 },
-        "city": { "type": "string", "maxLength": 64 },
-        "state": { "type": "string", "maxLength": 32 },
-        "postalCode": { "type": "string", "maxLength": 20 },
-        "placeId": { "type": "string", "maxLength": 128 },
+        "accuracyMeters": {
+          "type": "number"
+        },
+        "formattedAddress": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "normalizedStreet": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "neighborhood": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "postalCode": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "placeId": {
+          "type": "string",
+          "maxLength": 128
+        },
         "jurisdiction": {
           "type": "string",
-          "enum": ["atldot", "gdot", "unknown"]
+          "enum": [
+            "atldot",
+            "gdot",
+            "unknown"
+          ]
         },
-        "segmentId": { "type": "string", "maxLength": 128 },
+        "segmentId": {
+          "type": "string",
+          "maxLength": 128
+        },
         "segmentConfidence": {
           "type": "string",
-          "enum": ["verified", "provisional", "needs_review"]
+          "enum": [
+            "verified",
+            "provisional",
+            "needs_review"
+          ]
         },
-        "locationUserCorrected": { "type": "boolean" },
+        "locationUserCorrected": {
+          "type": "boolean"
+        },
         "status": {
           "type": "string",
-          "enum": ["accepted", "provisional", "reported", "acknowledged", "repaired", "rejected"]
+          "enum": [
+            "accepted",
+            "provisional",
+            "reported",
+            "acknowledged",
+            "repaired",
+            "rejected"
+          ]
         },
         "verificationStatus": {
           "type": "string",
-          "enum": ["accepted", "provisional", "needs_review", "rejected"]
+          "enum": [
+            "accepted",
+            "provisional",
+            "needs_review",
+            "rejected"
+          ]
         },
         "severityLabel": {
           "type": "string",
-          "enum": ["low", "moderate", "severe", "unclassified"]
+          "enum": [
+            "low",
+            "moderate",
+            "severe",
+            "unclassified"
+          ]
         },
         "primaryContributorUid": {
           "type": "string",
@@ -241,20 +342,47 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "primaryContributorUsername": { "type": "string", "maxLength": 32 },
-        "primaryContributorDisplayName": { "type": "string", "maxLength": 64 },
-        "primaryPhotoUrl": { "type": "string", "maxLength": 512 },
+        "primaryContributorUsername": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "primaryContributorDisplayName": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "primaryContributorPhotoURL": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Public-safe profile image snapshot used in community gallery attribution."
+        },
+        "primaryPhotoUrl": {
+          "type": "string",
+          "maxLength": 512
+        },
         "primaryMediaId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "evidenceCount": { "type": "integer" },
-        "submissionCount": { "type": "integer" },
-        "aiReviewSummary": { "type": "string", "maxLength": 300 },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "evidenceCount": {
+          "type": "integer"
+        },
+        "submissionCount": {
+          "type": "integer"
+        },
+        "aiReviewSummary": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "required": [
         "potholeId",
@@ -299,8 +427,14 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "username": { "type": "string", "maxLength": 32 },
-        "displayName": { "type": "string", "maxLength": 64 },
+        "username": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 64
+        },
         "potholeId": {
           "type": "string",
           "minLength": 1,
@@ -309,44 +443,103 @@
         },
         "actionType": {
           "type": "string",
-          "enum": ["new_pothole", "add_evidence", "provisional_review"]
+          "enum": [
+            "new_pothole",
+            "add_evidence",
+            "provisional_review"
+          ]
         },
         "duplicateStatus": {
           "type": "string",
-          "enum": ["distinct", "evidence_added", "pending_review", "merged", "rejected"]
+          "enum": [
+            "distinct",
+            "evidence_added",
+            "pending_review",
+            "merged",
+            "rejected"
+          ]
         },
-        "duplicateConfidence": { "type": "number" },
+        "duplicateConfidence": {
+          "type": "number"
+        },
         "mediaId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "photoUrl": { "type": "string", "maxLength": 512 },
-        "lat": { "type": "number" },
-        "lng": { "type": "number" },
+        "photoUrl": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        },
         "coordinateSource": {
           "type": "string",
-          "enum": ["gps_verified", "exif_extracted", "manual_pin"]
+          "enum": [
+            "gps_verified",
+            "exif_extracted",
+            "manual_pin"
+          ]
         },
-        "accuracyMeters": { "type": "number" },
-        "formattedAddress": { "type": "string", "maxLength": 256 },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "normalizedStreet": { "type": "string", "maxLength": 128 },
-        "locationUserCorrected": { "type": "boolean" },
-        "notes": { "type": "string", "maxLength": 400 },
+        "accuracyMeters": {
+          "type": "number"
+        },
+        "formattedAddress": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "normalizedStreet": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "locationUserCorrected": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 400
+        },
         "aiClassificationStatus": {
           "type": "string",
-          "enum": ["completed", "unavailable", "skipped"]
+          "enum": [
+            "completed",
+            "unavailable",
+            "skipped"
+          ]
         },
-        "aiIsRoadDefect": { "type": "boolean" },
+        "aiIsRoadDefect": {
+          "type": "boolean"
+        },
         "aiSeverityLabel": {
           "type": "string",
-          "enum": ["low", "moderate", "severe", "unclassified"]
+          "enum": [
+            "low",
+            "moderate",
+            "severe",
+            "unclassified"
+          ]
         },
-        "aiSummary": { "type": "string", "maxLength": 300 },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "aiSummary": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "required": [
         "submissionId",
@@ -377,16 +570,53 @@
       "description": "Server-only 30-day bounded reverse geocoding cache to avoid redundant Geocoding API calls.",
       "type": "object",
       "properties": {
-        "coordKey": { "type": "string", "maxLength": 64 },
-        "formattedAddress": { "type": "string", "maxLength": 256 },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "normalizedStreet": { "type": "string", "maxLength": 128 },
-        "city": { "type": "string", "maxLength": 64 },
-        "state": { "type": "string", "maxLength": 32 },
-        "jurisdiction": { "type": "string", "enum": ["atldot", "gdot", "unknown"] },
-        "expiresAt": { "type": "string", "format": "date-time" }
+        "coordKey": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "formattedAddress": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "normalizedStreet": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "jurisdiction": {
+          "type": "string",
+          "enum": [
+            "atldot",
+            "gdot",
+            "unknown"
+          ]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["coordKey", "formattedAddress", "streetName", "normalizedStreet", "city", "state", "jurisdiction", "expiresAt"]
+      "required": [
+        "coordKey",
+        "formattedAddress",
+        "streetName",
+        "normalizedStreet",
+        "city",
+        "state",
+        "jurisdiction",
+        "expiresAt"
+      ]
     },
     "FriendshipRecord": {
       "title": "FriendshipRecord",
@@ -416,12 +646,30 @@
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "accepted", "declined"]
+          "enum": [
+            "pending",
+            "accepted",
+            "declined"
+          ]
         },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["friendshipId", "requesterUid", "recipientUid", "participantUids", "status", "createdAt", "updatedAt"]
+      "required": [
+        "friendshipId",
+        "requesterUid",
+        "recipientUid",
+        "participantUids",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
     },
     "LeaderboardStat": {
       "title": "LeaderboardStat",
@@ -434,21 +682,58 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "username": { "type": "string", "maxLength": 32 },
-        "displayName": { "type": "string", "maxLength": 64 },
-        "photoURL": { "type": "string", "maxLength": 512 },
-        "showOnLeaderboard": { "type": "boolean" },
-        "shareNeighborhood": { "type": "boolean" },
-        "neighborhood": { "type": "string", "maxLength": 64 },
-        "overallDistinctCount": { "type": "integer" },
-        "overallEvidenceCount": { "type": "integer" },
-        "weeklyDistinctCount": { "type": "integer" },
-        "weeklyEvidenceCount": { "type": "integer" },
-        "weekKey": { "type": "string", "maxLength": 16 },
-        "monthlyDistinctCount": { "type": "integer" },
-        "monthlyEvidenceCount": { "type": "integer" },
-        "monthKey": { "type": "string", "maxLength": 16 },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "username": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "showOnLeaderboard": {
+          "type": "boolean"
+        },
+        "shareNeighborhood": {
+          "type": "boolean"
+        },
+        "neighborhood": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "overallDistinctCount": {
+          "type": "integer"
+        },
+        "overallEvidenceCount": {
+          "type": "integer"
+        },
+        "weeklyDistinctCount": {
+          "type": "integer"
+        },
+        "weeklyEvidenceCount": {
+          "type": "integer"
+        },
+        "weekKey": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "monthlyDistinctCount": {
+          "type": "integer"
+        },
+        "monthlyEvidenceCount": {
+          "type": "integer"
+        },
+        "monthKey": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "required": [
         "uid",
@@ -469,7 +754,7 @@
     },
     "AchievementBadge": {
       "title": "AchievementBadge",
-      "description": "Server-evaluated civic achievement badge progress and unlock status.",
+      "description": "Server-evaluated community achievement badge progress and unlock status.",
       "type": "object",
       "properties": {
         "badgeType": {
@@ -484,15 +769,42 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "title": { "type": "string", "maxLength": 64 },
-        "description": { "type": "string", "maxLength": 160 },
-        "progress": { "type": "integer" },
-        "target": { "type": "integer" },
-        "unlocked": { "type": "boolean" },
-        "unlockedAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "title": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "progress": {
+          "type": "integer"
+        },
+        "target": {
+          "type": "integer"
+        },
+        "unlocked": {
+          "type": "boolean"
+        },
+        "unlockedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["badgeType", "uid", "title", "description", "progress", "target", "unlocked", "updatedAt"]
+      "required": [
+        "badgeType",
+        "uid",
+        "title",
+        "description",
+        "progress",
+        "target",
+        "unlocked",
+        "updatedAt"
+      ]
     },
     "NotificationItem": {
       "title": "NotificationItem",
@@ -523,14 +835,40 @@
             "confirmed_repair"
           ]
         },
-        "title": { "type": "string", "maxLength": 96 },
-        "body": { "type": "string", "maxLength": 240 },
-        "relatedId": { "type": "string", "maxLength": 128 },
-        "read": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "title": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "relatedId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "read": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["notificationId", "uid", "type", "title", "body", "read", "createdAt", "updatedAt"]
+      "required": [
+        "notificationId",
+        "uid",
+        "type",
+        "title",
+        "body",
+        "read",
+        "createdAt",
+        "updatedAt"
+      ]
     },
     "ActivityFeedEvent": {
       "title": "ActivityFeedEvent",
@@ -549,20 +887,60 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "actorUsername": { "type": "string", "maxLength": 32 },
-        "actorDisplayName": { "type": "string", "maxLength": 64 },
+        "actorUsername": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "actorDisplayName": {
+          "type": "string",
+          "maxLength": 64
+        },
         "eventType": {
           "type": "string",
-          "enum": ["new_pothole", "evidence_added", "badge_unlocked", "confirmed_repair"]
+          "enum": [
+            "new_pothole",
+            "evidence_added",
+            "badge_unlocked",
+            "confirmed_repair"
+          ]
         },
-        "summary": { "type": "string", "maxLength": 200 },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "neighborhood": { "type": "string", "maxLength": 64 },
-        "potholeId": { "type": "string", "maxLength": 128 },
-        "visibility": { "type": "string", "enum": ["public"] },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "summary": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "neighborhood": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "potholeId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["eventId", "actorUid", "actorUsername", "actorDisplayName", "eventType", "summary", "visibility", "createdAt"]
+      "required": [
+        "eventId",
+        "actorUid",
+        "actorUsername",
+        "actorDisplayName",
+        "eventType",
+        "summary",
+        "visibility",
+        "createdAt"
+      ]
     },
     "StreetSegmentRecord": {
       "title": "StreetSegmentRecord",
@@ -575,30 +953,102 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "normalizedStreet": { "type": "string", "maxLength": 128 },
-        "corridorLabel": { "type": "string", "maxLength": 160 },
-        "city": { "type": "string", "maxLength": 64 },
-        "state": { "type": "string", "maxLength": 32 },
-        "neighborhood": { "type": "string", "maxLength": 64 },
-        "jurisdiction": { "type": "string", "enum": ["atldot", "gdot", "unknown"] },
-        "confidence": { "type": "string", "enum": ["verified", "provisional", "needs_review"] },
-        "anchorLat": { "type": "number" },
-        "anchorLng": { "type": "number" },
-        "minLat": { "type": "number" },
-        "maxLat": { "type": "number" },
-        "minLng": { "type": "number" },
-        "maxLng": { "type": "number" },
-        "minBlock": { "type": "integer" },
-        "maxBlock": { "type": "integer" },
-        "distinctAcceptedCount": { "type": "integer" },
-        "currentCycleNumber": { "type": "integer" },
-        "currentCycleDistinctCount": { "type": "integer" },
-        "activeReportId": { "type": "string", "maxLength": 128 },
-        "lastCutoffAt": { "type": "string", "format": "date-time" },
-        "status": { "type": "string", "enum": ["active", "merged"] },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "normalizedStreet": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "corridorLabel": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "neighborhood": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "jurisdiction": {
+          "type": "string",
+          "enum": [
+            "atldot",
+            "gdot",
+            "unknown"
+          ]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "provisional",
+            "needs_review"
+          ]
+        },
+        "anchorLat": {
+          "type": "number"
+        },
+        "anchorLng": {
+          "type": "number"
+        },
+        "minLat": {
+          "type": "number"
+        },
+        "maxLat": {
+          "type": "number"
+        },
+        "minLng": {
+          "type": "number"
+        },
+        "maxLng": {
+          "type": "number"
+        },
+        "minBlock": {
+          "type": "integer"
+        },
+        "maxBlock": {
+          "type": "integer"
+        },
+        "distinctAcceptedCount": {
+          "type": "integer"
+        },
+        "currentCycleNumber": {
+          "type": "integer"
+        },
+        "currentCycleDistinctCount": {
+          "type": "integer"
+        },
+        "activeReportId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "lastCutoffAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "merged"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "required": [
         "segmentId",
@@ -636,17 +1086,40 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "cycleNumber": { "type": "integer" },
-        "countedForThreshold": { "type": "boolean" },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "lat": { "type": "number" },
-        "lng": { "type": "number" },
-        "addedAt": { "type": "string", "format": "date-time" }
+        "cycleNumber": {
+          "type": "integer"
+        },
+        "countedForThreshold": {
+          "type": "boolean"
+        },
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["potholeId", "segmentId", "cycleNumber", "countedForThreshold", "streetName", "lat", "lng", "addedAt"]
+      "required": [
+        "potholeId",
+        "segmentId",
+        "cycleNumber",
+        "countedForThreshold",
+        "streetName",
+        "lat",
+        "lng",
+        "addedAt"
+      ]
     },
-    "CivicReportRecord": {
-      "title": "CivicReportRecord",
+    "CommunityReportRecord": {
+      "title": "CommunityReportRecord",
       "description": "Consolidated 5-distinct-pothole report packet for administrative review and honest external reporting.",
       "type": "object",
       "properties": {
@@ -662,10 +1135,25 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
-        "cycleNumber": { "type": "integer" },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "corridorLabel": { "type": "string", "maxLength": 160 },
-        "jurisdiction": { "type": "string", "enum": ["atldot", "gdot", "unknown"] },
+        "cycleNumber": {
+          "type": "integer"
+        },
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "corridorLabel": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "jurisdiction": {
+          "type": "string",
+          "enum": [
+            "atldot",
+            "gdot",
+            "unknown"
+          ]
+        },
         "status": {
           "type": "string",
           "enum": [
@@ -678,21 +1166,60 @@
             "closed"
           ]
         },
-        "distinctPotholeCount": { "type": "integer" },
-        "supplementCount": { "type": "integer" },
-        "snapshotPotholeIds": { "type": "array" },
-        "centerLat": { "type": "number" },
-        "centerLng": { "type": "number" },
-        "addressRange": { "type": "string", "maxLength": 200 },
-        "externalReference": { "type": "string", "maxLength": 128 },
-        "submissionChannel": { "type": "string", "maxLength": 128 },
-        "submittedByUid": { "type": "string", "maxLength": 128 },
-        "adminReviewNotes": { "type": "string", "maxLength": 500 },
-        "googleSheetUrl": { "type": "string", "maxLength": 512 },
-        "evidenceMateriallyChanged": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "cutoffAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "distinctPotholeCount": {
+          "type": "integer"
+        },
+        "supplementCount": {
+          "type": "integer"
+        },
+        "snapshotPotholeIds": {
+          "type": "array"
+        },
+        "centerLat": {
+          "type": "number"
+        },
+        "centerLng": {
+          "type": "number"
+        },
+        "addressRange": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "externalReference": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "submissionChannel": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "submittedByUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "adminReviewNotes": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "googleSheetUrl": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "evidenceMateriallyChanged": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cutoffAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "required": [
         "reportId",
@@ -716,36 +1243,99 @@
       "description": "Supplemental distinct pothole attached to an already active report cycle.",
       "type": "object",
       "properties": {
-        "supplementId": { "type": "string", "maxLength": 128 },
-        "reportId": { "type": "string", "maxLength": 128 },
-        "potholeId": { "type": "string", "maxLength": 128 },
-        "streetName": { "type": "string", "maxLength": 128 },
-        "formattedAddress": { "type": "string", "maxLength": 256 },
-        "addedAt": { "type": "string", "format": "date-time" }
+        "supplementId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "reportId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "potholeId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "streetName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "formattedAddress": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["supplementId", "reportId", "potholeId", "streetName", "formattedAddress", "addedAt"]
+      "required": [
+        "supplementId",
+        "reportId",
+        "potholeId",
+        "streetName",
+        "formattedAddress",
+        "addedAt"
+      ]
     },
     "AdminAuditEvent": {
       "title": "AdminAuditEvent",
       "description": "Immutable administrative audit log entry (server-written only).",
       "type": "object",
       "properties": {
-        "eventId": { "type": "string", "maxLength": 128 },
-        "actorUid": { "type": "string", "maxLength": 128 },
-        "actorEmail": { "type": "string", "maxLength": 254 },
-        "action": { "type": "string", "maxLength": 96 },
-        "targetType": { "type": "string", "maxLength": 48 },
-        "targetId": { "type": "string", "maxLength": 128 },
-        "reason": { "type": "string", "maxLength": 400 },
-        "beforeSummary": { "type": "string", "maxLength": 300 },
-        "afterSummary": { "type": "string", "maxLength": 300 },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "eventId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "actorUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "actorEmail": {
+          "type": "string",
+          "maxLength": 254
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "targetType": {
+          "type": "string",
+          "maxLength": 48
+        },
+        "targetId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "beforeSummary": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "afterSummary": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["eventId", "actorUid", "action", "targetType", "targetId", "reason", "createdAt"]
+      "required": [
+        "eventId",
+        "actorUid",
+        "action",
+        "targetType",
+        "targetId",
+        "reason",
+        "createdAt"
+      ]
     },
     "GameStatRecord": {
       "title": "GameStatRecord",
-      "description": "Server-validated entertainment minigame personal best and run counter strictly isolated from civic counts and leaderboards.",
+      "description": "Server-validated entertainment minigame personal best and run counter strictly isolated from community counts and leaderboards.",
       "type": "object",
       "properties": {
         "statId": {
@@ -762,13 +1352,29 @@
         },
         "gameId": {
           "type": "string",
-          "enum": ["pothole_repair", "pothole_runner"]
+          "enum": [
+            "pothole_repair",
+            "pothole_runner",
+            "crater_blitz",
+            "connector_cruise"
+          ]
         },
-        "highScore": { "type": "integer" },
-        "lastScore": { "type": "integer" },
-        "gamesPlayed": { "type": "integer" },
-        "bestDurationMs": { "type": "integer" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "highScore": {
+          "type": "integer"
+        },
+        "lastScore": {
+          "type": "integer"
+        },
+        "gamesPlayed": {
+          "type": "integer"
+        },
+        "bestDurationMs": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "required": [
         "statId",
@@ -791,85 +1397,227 @@
           "maxLength": 32
         }
       },
-      "required": ["status"]
+      "required": [
+        "status"
+      ]
+    },
+    "ImageVerificationRecord": {
+      "title": "ImageVerificationRecord",
+      "description": "Private owner/image-bound verification, model/prompt/schema and expiry, consumed submission",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ImageAnalysisCache": {
+      "title": "ImageAnalysisCache",
+      "description": "Owner-scoped sanitized content hash and version cache, pending lease and retry cooldown",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "VerificationBudget": {
+      "title": "VerificationBudget",
+      "description": "Transactional daily/minute counters and circuit state",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ImageClaim": {
+      "title": "ImageClaim",
+      "description": "Private permanent exact sanitized-image contribution uniqueness ledger",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ContributionEffect": {
+      "title": "ContributionEffect",
+      "description": "Durable retryable accepted contribution side effects",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "MediaRetired": {
+      "title": "MediaRetired",
+      "description": "Permanent server-owned tombstone preventing retired media ID reuse",
+      "type": "object"
+    },
+    "AccountConsent": {
+      "type": "object",
+      "description": "Server-owned versioned account consent.",
+      "properties": {
+        "ageConfirmed": {
+          "type": "boolean"
+        },
+        "aiConsent": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        },
+        "acceptedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ageConfirmed",
+        "aiConsent",
+        "version",
+        "acceptedAt"
+      ]
     }
   },
   "firestore": {
     "/users/{uid}": {
-      "schema": { "$ref": "#/entities/UserPublicProfile" },
+      "schema": {
+        "$ref": "#/entities/UserPublicProfile"
+      },
       "description": "Public contributor profile."
     },
     "/users/{uid}/private/account": {
-      "schema": { "$ref": "#/entities/UserPrivateAccount" },
+      "schema": {
+        "$ref": "#/entities/UserPrivateAccount"
+      },
       "description": "Private PII and notification preferences isolated to owner."
     },
     "/users/{uid}/storageChecks/{checkId}": {
-      "schema": { "$ref": "#/entities/StorageVerificationRecord" },
+      "schema": {
+        "$ref": "#/entities/StorageVerificationRecord"
+      },
       "description": "Phase 1 media reference metadata checks."
     },
     "/mediaObjects/{mediaId}": {
-      "schema": { "$ref": "#/entities/MediaObject" },
+      "schema": {
+        "$ref": "#/entities/MediaObject"
+      },
       "description": "Spark-tier free isolated binary media store served via /api/media/{mediaId}."
     },
     "/potholes/{potholeId}": {
-      "schema": { "$ref": "#/entities/PotholeRecord" },
+      "schema": {
+        "$ref": "#/entities/PotholeRecord"
+      },
       "description": "Canonical distinct Atlanta pothole records (server-written only)."
     },
     "/submissions/{submissionId}": {
-      "schema": { "$ref": "#/entities/PotholeSubmission" },
+      "schema": {
+        "$ref": "#/entities/PotholeSubmission"
+      },
       "description": "Individual contributor pothole photo/evidence submissions (server-written only)."
     },
     "/geocodeCache/{coordKey}": {
-      "schema": { "$ref": "#/entities/GeocodeCacheRecord" },
+      "schema": {
+        "$ref": "#/entities/GeocodeCacheRecord"
+      },
       "description": "Server-only reverse geocoding cache."
     },
     "/friendships/{friendshipId}": {
-      "schema": { "$ref": "#/entities/FriendshipRecord" },
+      "schema": {
+        "$ref": "#/entities/FriendshipRecord"
+      },
       "description": "Server-managed friend requests and accepted friendships."
     },
     "/leaderboardStats/{uid}": {
-      "schema": { "$ref": "#/entities/LeaderboardStat" },
+      "schema": {
+        "$ref": "#/entities/LeaderboardStat"
+      },
       "description": "Server-maintained overall, weekly, monthly, and opted-in neighborhood leaderboard stats."
     },
     "/achievements/{uid}/badges/{badgeType}": {
-      "schema": { "$ref": "#/entities/AchievementBadge" },
+      "schema": {
+        "$ref": "#/entities/AchievementBadge"
+      },
       "description": "Server-evaluated contributor achievements."
     },
     "/notifications/{uid}/items/{notificationId}": {
-      "schema": { "$ref": "#/entities/NotificationItem" },
+      "schema": {
+        "$ref": "#/entities/NotificationItem"
+      },
       "description": "Per-user in-app notifications."
     },
     "/activityFeed/{eventId}": {
-      "schema": { "$ref": "#/entities/ActivityFeedEvent" },
+      "schema": {
+        "$ref": "#/entities/ActivityFeedEvent"
+      },
       "description": "Public-safe street-level and achievement activity events."
     },
     "/streetSegments/{segmentId}": {
-      "schema": { "$ref": "#/entities/StreetSegmentRecord" },
+      "schema": {
+        "$ref": "#/entities/StreetSegmentRecord"
+      },
       "description": "Road-aligned street corridor segments (server-written only)."
     },
     "/streetSegments/{segmentId}/acceptedPotholes/{potholeId}": {
-      "schema": { "$ref": "#/entities/SegmentAcceptedPothole" },
+      "schema": {
+        "$ref": "#/entities/SegmentAcceptedPothole"
+      },
       "description": "Idempotent accepted pothole membership per segment (server-written only)."
     },
     "/reports/{reportId}": {
-      "schema": { "$ref": "#/entities/CivicReportRecord" },
-      "description": "Consolidated 5-pothole civic report cycles (server-written only)."
+      "schema": {
+        "$ref": "#/entities/CommunityReportRecord"
+      },
+      "description": "Consolidated 5-pothole community report cycles (server-written only)."
     },
     "/reports/{reportId}/supplements/{supplementId}": {
-      "schema": { "$ref": "#/entities/ReportSupplementRecord" },
+      "schema": {
+        "$ref": "#/entities/ReportSupplementRecord"
+      },
       "description": "Additional potholes attached to active report cycles (server-written only)."
     },
     "/adminAudit/{eventId}": {
-      "schema": { "$ref": "#/entities/AdminAuditEvent" },
+      "schema": {
+        "$ref": "#/entities/AdminAuditEvent"
+      },
       "description": "Immutable server-written administrative audit log."
     },
     "/gameStats/{statId}": {
-      "schema": { "$ref": "#/entities/GameStatRecord" },
-      "description": "Server-validated entertainment minigame high scores strictly isolated from civic metrics."
+      "schema": {
+        "$ref": "#/entities/GameStatRecord"
+      },
+      "description": "Server-validated entertainment minigame high scores strictly isolated from community metrics."
     },
     "/test/{docId}": {
-      "schema": { "$ref": "#/entities/TestConnection" },
+      "schema": {
+        "$ref": "#/entities/TestConnection"
+      },
       "description": "Boot connectivity check document."
+    },
+    "/imageVerifications/{verificationId}": {
+      "schema": {
+        "$ref": "#/entities/ImageVerificationRecord"
+      },
+      "description": "Private owner/image-bound verification, model/prompt/schema and expiry, consumed submission"
+    },
+    "/imageAnalysisCache/{cacheId}": {
+      "schema": {
+        "$ref": "#/entities/ImageAnalysisCache"
+      },
+      "description": "Owner-scoped sanitized content hash and version cache, pending lease and retry cooldown"
+    },
+    "/verificationBudgets/{budgetId}": {
+      "schema": {
+        "$ref": "#/entities/VerificationBudget"
+      },
+      "description": "Transactional daily/minute counters and circuit state"
+    },
+    "/imageClaims/{contentHash}": {
+      "schema": {
+        "$ref": "#/entities/ImageClaim"
+      },
+      "description": "Private permanent exact sanitized-image contribution uniqueness ledger"
+    },
+    "/contributionEffects/{submissionId}": {
+      "schema": {
+        "$ref": "#/entities/ContributionEffect"
+      },
+      "description": "Durable retryable accepted contribution side effects"
+    },
+    "/mediaRetired/{mediaId}": {
+      "schema": {
+        "$ref": "#/entities/MediaRetired"
+      },
+      "description": "Retired media ID tombstones"
+    },
+    "/users/{uid}/private/consent": {
+      "schema": {
+        "$ref": "#/entities/AccountConsent"
+      },
+      "description": "Server-only account consent record."
     }
   }
 }

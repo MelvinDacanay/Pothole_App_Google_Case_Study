@@ -23,7 +23,7 @@ export default defineConfig(({ command }) => {
           name: 'PatchUp',
           short_name: 'PatchUp',
           description:
-            'Atlanta crowdsourced pothole documentation, civic street-level reporting, and social road-safety PWA.',
+            'Atlanta crowdsourced pothole documentation, community street-level reporting, and social road-safety PWA.',
           theme_color: '#FFFFFF',
           background_color: '#FFFFFF',
           display: 'standalone',

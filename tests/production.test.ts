@@ -12,6 +12,31 @@ import {
 import { assessSegmentConfidence, parseStreetNumber } from '../server/segments.ts';
 import { validateGameScorePayload } from '../server/games.ts';
 import { checkRateLimit, resetRateLimiterForTests } from '../server/rateLimit.ts';
+import { readApiJson } from '../src/lib/apiResponse.ts';
+
+test('API responses reject SPA HTML, malformed JSON, and backend failures safely', async () => {
+  await assert.rejects(
+    readApiJson(new Response('<!doctype html><html></html>', { headers: { 'Content-Type': 'text/html' } })),
+    /community backend is unavailable/
+  );
+  await assert.rejects(
+    readApiJson(new Response('{invalid', { headers: { 'Content-Type': 'application/json' } })),
+    /invalid JSON/
+  );
+  await assert.rejects(
+    readApiJson(new Response('{"error":"Sign in required."}', {
+      status: 401, headers: { 'Content-Type': 'application/json' },
+    })),
+    /Sign in required/
+  );
+  await assert.rejects(
+    readApiJson(new Response('null', { headers: { 'Content-Type': 'application/json' } })),
+    /unexpected response/
+  );
+  assert.deepEqual(await readApiJson(new Response('{"users":[]}', {
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  })), { users: [] });
+});
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -166,6 +191,22 @@ test('Atlanta geographic normalization, parallel streets & corridor confidence e
 });
 
 test('Minigame score bounds and anti-forge duration plausibility', () => {
+  assert.equal(
+    validateGameScorePayload({ gameId: 'crater_blitz', score: 1500, durationMs: 30000 }).ok,
+    true
+  );
+  assert.equal(
+    validateGameScorePayload({ gameId: 'crater_blitz', score: 6050, durationMs: 30000 }).ok,
+    false
+  );
+  assert.equal(
+    validateGameScorePayload({ gameId: 'connector_cruise', score: 400, durationMs: 30000 }).ok,
+    true
+  );
+  assert.equal(
+    validateGameScorePayload({ gameId: 'connector_cruise', score: 20000, durationMs: 2000 }).ok,
+    false
+  );
   assert.equal(
     validateGameScorePayload({ gameId: 'pothole_repair', score: 915, durationMs: 12000 }).ok,
     true

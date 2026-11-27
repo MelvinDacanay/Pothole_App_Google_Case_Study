@@ -36,12 +36,12 @@ const STAGE_LABELS: Record<RepairStage, { step: number; title: string; instructi
   prep: {
     step: 1,
     title: 'Clear Debris',
-    instruction: 'Tap or swipe over all 6 loose chunks inside the crater.',
+    instruction: 'Tap or swipe over all 6 loose chunks inside the pothole.',
   },
   pour: {
     step: 2,
     title: 'Pour Asphalt Mix',
-    instruction: 'Press & hold inside the crater (or Spacebar) until fill hits 85–100%.',
+    instruction: 'Press & hold inside the pothole (or Spacebar) until fill hits 85–100%.',
   },
   fill: {
     step: 3,
@@ -86,7 +86,7 @@ export const PotholeRepairGame: React.FC<PotholeRepairGameProps> = ({
 
   const [gameState, setGameState] = useState<RepairState>('TITLE_MENU');
   const [stage, setStage] = useState<RepairStage>('prep');
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [pourLevel, setPourLevel] = useState(0);
   const [smoothness, setSmoothness] = useState(0);
@@ -647,14 +647,14 @@ export const PotholeRepairGame: React.FC<PotholeRepairGameProps> = ({
   const stageMeta = STAGE_LABELS[stage];
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8DFC5] p-4 sm:p-6 space-y-4">
+    <div className="bg-[#fffaf0] p-4 sm:p-6 space-y-4 [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-[#39a9df]">
       {/* Unobtrusive Top HUD */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#E8DFC5]">
         <div>
           <h2 className="font-display text-lg sm:text-xl font-bold text-[#2D2B35]">
-            Pothole Repair Crew
+            Repair Crew
           </h2>
-          <p className="text-xs text-[#6E6978]">
+          <p className="text-sm text-slate-600">
             {gameState === 'PLAYING'
               ? `Step ${stageMeta.step}/4 · ${stageMeta.title}: ${stageMeta.instruction}`
               : '4-step Atlanta street crew repair challenge: Prep, Pour, Tamp, and Smooth.'}
@@ -682,6 +682,7 @@ export const PotholeRepairGame: React.FC<PotholeRepairGameProps> = ({
             type="button"
             onClick={() => setMuted((m) => !m)}
             aria-label={muted ? 'Unmute sound effects' : 'Mute sound effects'}
+            aria-pressed={!muted}
             className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-[#2D2B35]"
           >
             {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -713,9 +714,10 @@ export const PotholeRepairGame: React.FC<PotholeRepairGameProps> = ({
       </div>
 
       {/* Interactive Repair Canvas */}
-      <div className="relative rounded-2xl overflow-hidden border border-[#E8DFC5] bg-[#3A3535]">
+      <div className="relative overflow-hidden border-2 border-[#24212b] bg-[#3A3535]">
         <canvas
           ref={canvasRef}
+          aria-label="Interactive pothole repair surface. Keyboard and single-button repair controls are available below."
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -725,16 +727,16 @@ export const PotholeRepairGame: React.FC<PotholeRepairGameProps> = ({
         />
 
         {gameState === 'TITLE_MENU' && (
-          <div className="absolute inset-0 bg-[#2D2B35]/88 flex flex-col items-center justify-center p-6 text-center text-white space-y-4">
-            <h3 className="font-display text-2xl font-extrabold">Ready to Patch Peachtree?</h3>
-            <p className="text-xs sm:text-sm text-[#E8DFC5] max-w-md leading-relaxed">
+          <div className="absolute inset-0 overflow-y-auto bg-[#24212b]/95 flex flex-col items-center justify-center p-4 text-center text-white space-y-3">
+            <h3 className="font-display text-xl sm:text-3xl font-extrabold">MAKE GOOD GROUND.</h3>
+            <p className="text-sm text-[#E8DFC5] max-w-md leading-relaxed">
               Clear loose gravel, pour hot asphalt mix to the green 85–100% mark, tamp all 5 seam
               pockets, and scrub the trowel flush.
             </p>
             <button
               type="button"
               onClick={startFreshRun}
-              className="min-h-[48px] px-6 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white font-semibold text-sm inline-flex items-center gap-2"
+              className="min-h-[48px] px-6 py-2.5 bg-[#f4c52f] hover:bg-[#fbd65c] text-[#24212b] font-semibold text-sm inline-flex items-center gap-2"
             >
               <Play className="w-4 h-4" />
               <span>Start Repair Shift</span>

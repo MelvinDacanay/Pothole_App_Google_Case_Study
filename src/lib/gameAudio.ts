@@ -19,10 +19,18 @@ function getAudioContext(): AudioContext | null {
   return sharedAudioCtx;
 }
 
-export function playGameTone(
-  type: 'tap' | 'jump' | 'collect' | 'stage' | 'win' | 'crash',
-  muted: boolean
-): void {
+export type GameToneType =
+  | 'tap'
+  | 'jump'
+  | 'collect'
+  | 'stage'
+  | 'win'
+  | 'crash'
+  | 'combo'
+  | 'penalty'
+  | 'lane';
+
+export function playGameTone(type: GameToneType, muted: boolean): void {
   if (muted) return;
   try {
     const ctx = getAudioContext();
@@ -75,6 +83,31 @@ export function playGameTone(
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.34);
       osc.start(now);
       osc.stop(now + 0.35);
+    } else if (type === 'combo') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(587, now);
+      osc.frequency.setValueAtTime(784, now + 0.045);
+      osc.frequency.setValueAtTime(1046, now + 0.09);
+      gain.gain.setValueAtTime(0.07, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } else if (type === 'lane') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(310, now);
+      osc.frequency.exponentialRampToValueAtTime(430, now + 0.05);
+      gain.gain.setValueAtTime(0.045, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      osc.start(now);
+      osc.stop(now + 0.07);
+    } else if (type === 'penalty') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(240, now);
+      osc.frequency.setValueAtTime(165, now + 0.07);
+      gain.gain.setValueAtTime(0.065, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc.start(now);
+      osc.stop(now + 0.19);
     } else {
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(190, now);

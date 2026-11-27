@@ -121,6 +121,7 @@ export async function createNotification(
 export async function createActivityFeedEvent(
   db: Firestore,
   params: {
+    eventId?:string;
     actorUid: string;
     actorUsername: string;
     actorDisplayName: string;
@@ -131,7 +132,7 @@ export async function createActivityFeedEvent(
     potholeId?: string;
   }
 ): Promise<void> {
-  const eventId = `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const eventId = params.eventId || `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   await db.collection('activityFeed').doc(eventId).set({
     eventId,
     actorUid: params.actorUid,
@@ -170,7 +171,7 @@ export async function evaluateUserAchievements(
   const userData = userSnap.data()!;
   const distinctCount = Number(userData.distinctPotholeCount || 0);
   const username = String(userData.username || 'atlanta_user');
-  const displayName = String(userData.displayName || 'Contributor');
+  const displayName = String(userData.displayName || 'Patcher');
 
   // Inspect accepted potholes contributed by this user to calculate neighborhoods & confirmed repairs
   const potholeSnap = await db
@@ -274,11 +275,13 @@ export async function evaluateUserAchievements(
         createNotification(db, {
           uid,
           type: 'badge_unlocked',
+          notificationId:`badge_${badge.badgeType}`,
           title: `Badge Unlocked: ${badge.title}`,
           body: badge.description,
           relatedId: badge.badgeType,
         }),
         createActivityFeedEvent(db, {
+          eventId:`badge_${uid}_${badge.badgeType}`.slice(0,128),
           actorUid: uid,
           actorUsername: username,
           actorDisplayName: displayName,
@@ -293,16 +296,15 @@ export async function evaluateUserAchievements(
 }
 
 export async function syncUserLeaderboardProfile(db: Firestore, uid: string): Promise<void> {
-  const userSnap = await db.collection('users').doc(uid).get();
-  if (!userSnap.exists) return;
-
-  const user = userSnap.data()!;
+  const userRef=db.collection('users').doc(uid);
   const statsRef = db.collection('leaderboardStats').doc(uid);
   const weekKey = getCurrentWeekKey();
   const monthKey = getCurrentMonthKey();
 
   await db.runTransaction(async (tx) => {
-    const statsSnap = await tx.get(statsRef);
+    const [userSnap,statsSnap]=await Promise.all([tx.get(userRef),tx.get(statsRef)]);
+    if(!userSnap.exists)return;
+    const user=userSnap.data()!;
     const existing = statsSnap.exists ? statsSnap.data()! : null;
 
     const shareNeighborhood = Boolean(user.shareNeighborhood);
@@ -325,7 +327,7 @@ export async function syncUserLeaderboardProfile(db: Firestore, uid: string): Pr
       {
         uid,
         username: String(user.username || 'atlanta_user').slice(0, 32),
-        displayName: String(user.displayName || 'Contributor').slice(0, 64),
+        displayName: String(user.displayName || 'Patcher').slice(0, 64),
         ...(typeof user.photoURL === 'string' && user.photoURL
           ? { photoURL: user.photoURL.slice(0, 512) }
           : {}),

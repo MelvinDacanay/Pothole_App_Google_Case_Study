@@ -1,0 +1,11 @@
+{
+  "title": "patchup-v1",
+  "description": "A project setup utility that bootstraps imported apps and verifies deployment and preview configurations, helping developers prepare projects for reliable release.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

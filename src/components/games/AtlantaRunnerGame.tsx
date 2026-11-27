@@ -42,7 +42,7 @@ export const AtlantaRunnerGame: React.FC<AtlantaRunnerGameProps> = ({
   const lastFrameRef = useRef<number>(0);
 
   const [gameState, setGameState] = useState<RunnerState>('TITLE_MENU');
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [hudScore, setHudScore] = useState(0);
   const [hudSpeed, setHudSpeed] = useState(1);
   const [finalStats, setFinalStats] = useState<{
@@ -604,14 +604,14 @@ export const AtlantaRunnerGame: React.FC<AtlantaRunnerGameProps> = ({
   }, [gameState, releaseJump, resetRun, setDuck, triggerJump]);
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8DFC5] p-4 sm:p-6 space-y-4">
+    <div className="bg-[#fffaf0] p-4 sm:p-6 space-y-4 [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-[#39a9df]">
       {/* Unobtrusive Top HUD */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#E8DFC5]">
         <div>
           <h2 className="font-display text-lg sm:text-xl font-bold text-[#2D2B35]">
-            Atlanta Pothole Runner
+            Peachtree Sprint
           </h2>
-          <p className="text-xs text-[#6E6978]">
+          <p className="text-sm text-slate-600">
             Dodge potholes, cones & steel plates beneath Peachtree’s Bank of America Plaza skyline.
           </p>
         </div>
@@ -640,6 +640,7 @@ export const AtlantaRunnerGame: React.FC<AtlantaRunnerGameProps> = ({
             type="button"
             onClick={() => setMuted((m) => !m)}
             aria-label={muted ? 'Unmute sound effects' : 'Mute sound effects'}
+            aria-pressed={!muted}
             className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/50 text-[#2D2B35]"
           >
             {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -648,9 +649,10 @@ export const AtlantaRunnerGame: React.FC<AtlantaRunnerGameProps> = ({
       </div>
 
       {/* Pixel-Art Runner Canvas */}
-      <div className="relative rounded-2xl overflow-hidden border border-[#E8DFC5] bg-[#1F2436]">
+      <div className="relative overflow-hidden border-2 border-[#24212b] bg-[#1F2436]">
         <canvas
           ref={canvasRef}
+          aria-label="Peachtree Sprint: jump over street hazards. Use the Jump button or Space, and Tuck or the down arrow."
           onPointerDown={triggerJump}
           onPointerUp={releaseJump}
           onPointerCancel={releaseJump}
@@ -658,16 +660,16 @@ export const AtlantaRunnerGame: React.FC<AtlantaRunnerGameProps> = ({
         />
 
         {gameState === 'TITLE_MENU' && (
-          <div className="absolute inset-0 bg-[#1F2436]/80 flex flex-col items-center justify-center p-5 text-center text-white space-y-3">
-            <h3 className="font-display text-2xl font-extrabold">Sprint Peachtree Street</h3>
-            <p className="text-xs sm:text-sm text-[#E8DFC5] max-w-md">
+          <div className="absolute inset-0 overflow-y-auto bg-[#24212b]/95 flex flex-col items-center justify-center p-4 text-center text-white space-y-3">
+            <h3 className="font-display text-xl sm:text-3xl font-extrabold">RUN THE CITY.</h3>
+            <p className="text-sm text-[#E8DFC5] max-w-md">
               Tap, click, or press Space / ArrowUp to leap over potholes and cones. Grab green repair
               kits for +25 bonus points!
             </p>
             <button
               type="button"
               onClick={resetRun}
-              className="min-h-[48px] px-6 py-2.5 rounded-xl bg-[#4CB729] hover:bg-[#3FA31F] text-white font-semibold text-sm inline-flex items-center gap-2"
+              className="min-h-[48px] px-6 py-2.5 bg-[#f4c52f] hover:bg-[#fbd65c] text-[#24212b] font-semibold text-sm inline-flex items-center gap-2"
             >
               <Play className="w-4 h-4" />
               <span>Start Run</span>

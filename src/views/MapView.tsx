@@ -1,8 +1,9 @@
+import { ProtectedImage } from '../components/ProtectedImage';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Camera, FileText, Layers, MapPin, ShieldCheck, X } from 'lucide-react';
+import { Camera, Layers, MapPin, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCommunityPotholes } from '../hooks/usePotholes';
-import { useFriends } from '../hooks/useSocial';
+import { useMySubmissions } from '../hooks/usePotholes';
 import {
   COORDINATE_SOURCE_LABELS,
   JURISDICTION_LABELS,
@@ -11,11 +12,10 @@ import {
   POTHOLE_STATUS_LABELS,
   PotholeRecord,
   PotholeSubmission,
-  SEGMENT_CONFIDENCE_LABELS,
 } from '../lib/maps';
 import { AtlantaMap } from '../components/AtlantaMap';
 
-type MapFilter = 'all' | 'accepted' | 'provisional' | 'repaired';
+type MapFilter = 'all' | 'accepted' | 'repaired';
 
 interface MapViewProps {
   selectedPothole: PotholeRecord | null;
@@ -24,7 +24,6 @@ interface MapViewProps {
   onSelectPothole: (pothole: PotholeRecord | null) => void;
   onAddEvidence: (pothole: PotholeRecord) => void;
   onStartCapture: () => void;
-  onOpenCommunity: () => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -34,11 +33,10 @@ export const MapView: React.FC<MapViewProps> = ({
   onSelectPothole,
   onAddEvidence,
   onStartCapture,
-  onOpenCommunity,
 }) => {
   const { user } = useAuth();
   const { potholes, loading } = useCommunityPotholes();
-  const { acceptedFriends } = useFriends(user);
+  const {submissions}=useMySubmissions(user?.uid??null);
 
   const [mapsConfig, setMapsConfig] = useState<MapsClientConfig>({
     configured: false,
@@ -47,7 +45,6 @@ export const MapView: React.FC<MapViewProps> = ({
   });
   const [statusFilter, setStatusFilter] = useState<MapFilter>('all');
   const [onlyMine, setOnlyMine] = useState(false);
-  const [onlyFriends, setOnlyFriends] = useState(false);
   const [evidenceItems, setEvidenceItems] = useState<PotholeSubmission[]>([]);
   const [loadingEvidence, setLoadingEvidence] = useState(false);
 
@@ -90,19 +87,16 @@ export const MapView: React.FC<MapViewProps> = ({
     };
   }, [selectedPothole]);
 
-  const friendUidSet = useMemo(
-    () => new Set(acceptedFriends.map((f) => f.otherUid)),
-    [acceptedFriends]
-  );
+  const myIds=useMemo(()=>new Set(submissions.filter(s=>['distinct','evidence_added'].includes(s.duplicateStatus)).map(s=>s.potholeId)),[submissions]);
 
   const filteredPotholes = useMemo(() => {
     return potholes.filter((p) => {
-      if (onlyMine && user && p.primaryContributorUid !== user.uid) return false;
-      if (onlyFriends && user && !friendUidSet.has(p.primaryContributorUid)) return false;
+      if (onlyMine && user && !myIds.has(p.potholeId)) return false;
       if (statusFilter === 'all') return true;
+      if(statusFilter==='accepted')return ['accepted','reported','acknowledged'].includes(p.status);
       return p.status === statusFilter;
     });
-  }, [potholes, statusFilter, onlyMine, onlyFriends, friendUidSet, user]);
+  }, [potholes, statusFilter, onlyMine, myIds, user]);
 
   const focusCoords = selectedPothole
     ? { lat: selectedPothole.lat, lng: selectedPothole.lng }
@@ -112,7 +106,7 @@ export const MapView: React.FC<MapViewProps> = ({
     <div className="city-page city-map space-y-5">
       <div className="page-banner page-banner-map">
         <div>
-          <span className="page-banner-index">STREET VIEW / 02</span>
+          <span className="page-banner-index">STREET VIEW</span>
           <h1>READ THE<br /><em>ROAD.</em></h1>
           <p>Every pin is a Patcher’s field report. Filter the city, inspect the evidence, find the pattern.</p>
         </div>
@@ -133,7 +127,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
         <div className="min-w-0 flex flex-wrap items-center gap-2">
           <div className="scrollbar-none w-full sm:w-auto inline-flex items-center gap-1 p-1 bg-[#F7F7F8] border border-[#E8DFC5] rounded-xl overflow-x-auto">
-            {(['all', 'accepted', 'provisional', 'repaired'] as const).map((filterKey) => (
+            {(['all', 'accepted', 'repaired'] as const).map((filterKey) => (
               <button
                 key={filterKey}
                 type="button"
@@ -148,9 +142,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   ? 'All'
                   : filterKey === 'accepted'
                     ? 'Accepted'
-                    : filterKey === 'provisional'
-                      ? 'Needs Review'
-                      : 'Repaired'}
+                    : 'Repaired'}
               </button>
             ))}
           </div>
@@ -161,7 +153,6 @@ export const MapView: React.FC<MapViewProps> = ({
                 type="button"
                 onClick={() => {
                   setOnlyMine((v) => !v);
-                  setOnlyFriends(false);
                 }}
                 className={`flex-1 sm:flex-none min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition whitespace-nowrap ${
                   onlyMine
@@ -171,31 +162,9 @@ export const MapView: React.FC<MapViewProps> = ({
               >
                 My Spots Only
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOnlyFriends((v) => !v);
-                  setOnlyMine(false);
-                }}
-                className={`flex-1 sm:flex-none min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition whitespace-nowrap ${
-                  onlyFriends
-                    ? 'bg-[#2D2B35] border-[#2D2B35] text-white'
-                    : 'bg-[#F7F7F8] border-[#E8DFC5] text-[#2D2B35] hover:bg-[#E8DFC5]/40'
-                }`}
-              >
-                Friends Only ({acceptedFriends.length})
-              </button>
+
             </>
           )}
-
-          <button
-            type="button"
-            onClick={onOpenCommunity}
-            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/40 text-xs font-semibold text-[#2D2B35] whitespace-nowrap"
-          >
-            <FileText className="w-4 h-4 text-[#4CB729]" />
-            <span>Corridors</span>
-          </button>
 
           <button
             type="button"
@@ -244,7 +213,7 @@ export const MapView: React.FC<MapViewProps> = ({
             </div>
 
             <div className="rounded-xl overflow-hidden border border-[#E8DFC5] bg-[#F7F7F8] aspect-video flex items-center justify-center">
-              <img
+              <ProtectedImage publicPhoto
                 src={selectedPothole.primaryPhotoUrl}
                 alt={`Pothole at ${selectedPothole.streetName}`}
                 referrerPolicy="no-referrer"
@@ -272,25 +241,6 @@ export const MapView: React.FC<MapViewProps> = ({
                 <ShieldCheck className="w-4 h-4 text-[#4CB729] shrink-0" />
                 <span>{JURISDICTION_LABELS[selectedPothole.jurisdiction]}</span>
               </div>
-              {selectedPothole.segmentId && (
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-[#6E6978] truncate">
-                    Corridor:{' '}
-                    <span className="font-mono text-[#2D2B35]">
-                      {selectedPothole.segmentConfidence
-                        ? SEGMENT_CONFIDENCE_LABELS[selectedPothole.segmentConfidence]
-                        : selectedPothole.segmentId}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={onOpenCommunity}
-                    className="font-semibold text-[#4CB729] hover:underline shrink-0"
-                  >
-                    View Report Cycle
-                  </button>
-                </div>
-              )}
               <div className="flex items-center gap-2 font-mono text-[11px] text-[#6E6978] tabular-nums">
                 <MapPin className="w-4 h-4 shrink-0" />
                 <span>
@@ -298,7 +248,7 @@ export const MapView: React.FC<MapViewProps> = ({
                 </span>
               </div>
               <div className="text-[#6E6978]">
-                Primary contributor:{' '}
+                Primary Patcher:{' '}
                 <span className="font-mono text-[#2D2B35]">
                   @{selectedPothole.primaryContributorUsername}
                 </span>
@@ -336,7 +286,7 @@ export const MapView: React.FC<MapViewProps> = ({
                       key={sub.submissionId}
                       className="flex items-center gap-2.5 p-2 rounded-xl bg-[#F7F7F8] border border-[#E8DFC5]/60"
                     >
-                      <img
+                      <ProtectedImage publicPhoto
                         src={sub.photoUrl}
                         alt={`Evidence by ${sub.username}`}
                         referrerPolicy="no-referrer"
@@ -378,7 +328,7 @@ export const MapView: React.FC<MapViewProps> = ({
                     : 'border-[#E8DFC5] bg-[#F7F7F8] hover:bg-[#E8DFC5]/30'
                 }`}
               >
-                <img
+                <ProtectedImage publicPhoto
                   src={p.primaryPhotoUrl}
                   alt={p.streetName}
                   referrerPolicy="no-referrer"

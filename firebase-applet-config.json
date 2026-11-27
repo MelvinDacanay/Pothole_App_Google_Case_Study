@@ -1,11 +1,11 @@
 {
   "projectId": "patchup-fff96",
-  "appId": "",
+  "appId": "1:884267611225:web:72383e3d163038845b2d48",
   "apiKey": "",
   "authDomain": "patchup-fff96.firebaseapp.com",
-  "firestoreDatabaseId": "",
+  "firestoreDatabaseId": "(default)",
   "storageBucket": "patchup-fff96.firebasestorage.app",
-  "messagingSenderId": "",
+  "messagingSenderId": "884267611225",
   "measurementId": "",
   "oAuthClientId": "",
   "recaptchaSiteKey": ""

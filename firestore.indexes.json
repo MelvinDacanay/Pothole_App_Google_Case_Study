@@ -1,0 +1,30 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "submissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "potholeId",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "mediaObjects",
+      "fieldPath": "data",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mediaObjects",
+      "fieldPath": "thumbnailData",
+      "indexes": []
+    }
+  ]
+}

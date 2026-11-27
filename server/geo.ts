@@ -307,37 +307,9 @@ export async function reverseGeocodeCoords(params: {
   apiKey: string;
   firestoreDb: Firestore | null;
 }): Promise<ReverseGeocodeResult> {
-  const { lat, lng, apiKey, firestoreDb } = params;
-  const coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`;
+  const { lat, lng, apiKey } = params;
 
-  // 1. Check 29-day Firestore geocodeCache first to avoid redundant API calls
-  if (firestoreDb) {
-    try {
-      const cacheSnap = await firestoreDb.collection('geocodeCache').doc(coordKey).get();
-      if (cacheSnap.exists) {
-        const data = cacheSnap.data();
-        const expiresAt = data?.expiresAt as Timestamp | undefined;
-        if (data && expiresAt && expiresAt.toMillis() > Date.now()) {
-          return {
-            formattedAddress: String(data.formattedAddress || ''),
-            streetName: String(data.streetName || ''),
-            normalizedStreet: String(data.normalizedStreet || ''),
-            neighborhood: String(data.neighborhood || ''),
-            city: String(data.city || 'Atlanta'),
-            state: String(data.state || 'GA'),
-            postalCode: String(data.postalCode || ''),
-            placeId: String(data.placeId || ''),
-            jurisdiction: (data.jurisdiction as JurisdictionType) || 'unknown',
-            source: (data.source as ReverseGeocodeResult['source']) || 'google_geocoding_v4',
-            cached: true,
-          };
-        }
-      }
-    } catch {
-      // Cache lookup failures should not block geocoding
-    }
-  }
-
+  // No shared caching of Google-derived addresses. This helper is transient only.
   if (!apiKey) {
     return buildFallbackGeocode(lat, lng);
   }
@@ -418,29 +390,6 @@ export async function reverseGeocodeCoords(params: {
 
   if (!result) {
     return buildFallbackGeocode(lat, lng);
-  }
-
-  // Cache for 29 days (strictly < 30-day ToS cache limit)
-  if (firestoreDb) {
-    try {
-      const expiresAt = Timestamp.fromMillis(Date.now() + 29 * 24 * 60 * 60 * 1000);
-      await firestoreDb.collection('geocodeCache').doc(coordKey).set({
-        coordKey,
-        formattedAddress: result.formattedAddress,
-        streetName: result.streetName,
-        normalizedStreet: result.normalizedStreet,
-        neighborhood: result.neighborhood,
-        city: result.city,
-        state: result.state,
-        postalCode: result.postalCode,
-        placeId: result.placeId,
-        jurisdiction: result.jurisdiction,
-        source: result.source,
-        expiresAt,
-      });
-    } catch {
-      // Non-fatal cache write error
-    }
   }
 
   return result;

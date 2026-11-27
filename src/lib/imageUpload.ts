@@ -1,6 +1,4 @@
-import { Bytes, doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
-
+import { auth } from './firebase';
 export const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export const MAX_RAW_FILE_BYTES = 10 * 1024 * 1024; // 10 MB raw upload ceiling
 export const TARGET_COMPRESSED_BYTES = 300 * 1024; // ~300 KB target for Spark-tier mediaObjects
@@ -18,7 +16,7 @@ export interface CompressedImageResult {
 
 export function validateRawImageFile(file: File): string | null {
   if (!ALLOWED_IMAGE_MIME_TYPES.includes(file.type as (typeof ALLOWED_IMAGE_MIME_TYPES)[number])) {
-    return 'Unsupported format. Please select a JPEG, PNG, or WebP photograph.';
+    return 'Unsupported format. Please select a JPEG, PNG, or WebP photograph. For HEIC, export as JPEG first.';
   }
   if (file.size <= 0) {
     return 'The selected file is empty.';
@@ -82,12 +80,9 @@ export async function compressImageForUpload(file: File): Promise<CompressedImag
     if (encoded.blob.size > MAX_STORAGE_BYTES) {
       encoded = await encodeScaledCanvas(bitmap, 720, outputMime);
     }
-    if (encoded.blob.size > MAX_STORAGE_BYTES) {
-      encoded = await encodeScaledCanvas(bitmap, 560, 'image/jpeg');
-    }
 
     if (encoded.blob.size > MAX_STORAGE_BYTES) {
-      throw new Error('Compressed image still exceeds the 380 KB Spark-tier media limit.');
+      throw new Error('Photo is too large after compression. Crop closer or retake it.');
     }
 
     const finalContentType: 'image/jpeg' | 'image/webp' =
@@ -112,6 +107,7 @@ export interface StorageUploadOptions {
   compressed: CompressedImageResult;
   onProgress?: (percent: number) => void;
   signal?: AbortSignal;
+  privacyConfirmed: boolean;
 }
 
 export interface StorageUploadResult {
@@ -125,85 +121,20 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isNonRetryableFirestoreError(err: unknown): boolean {
-  const code = (err as { code?: string })?.code ?? '';
-  return (
-    code === 'permission-denied' ||
-    code === 'unauthenticated' ||
-    code === 'invalid-argument' ||
-    code === 'failed-precondition'
-  );
+export async function uploadImageWithRetry({uid,fileId,compressed,onProgress,signal,privacyConfirmed}:StorageUploadOptions):Promise<StorageUploadResult> {
+  const user=auth?.currentUser;if(!user||user.uid!==uid)throw new Error('Sign in again to upload.');
+  const bytes=new Uint8Array(await compressed.blob.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+  const payload=JSON.stringify({mediaId:fileId,contentType:compressed.contentType,data:btoa(binary),privacyConfirmed});
+  for(let attempt=0;attempt<3;attempt++){
+    if(signal?.aborted)throw new Error('Upload canceled.');
+    onProgress?.(20);
+    const token=await user.getIdToken();
+    let response:Response;
+    try{response=await fetch('/api/media/upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:payload,signal});}catch(e){if(attempt===2||signal?.aborted)throw e;await sleep(400*2**attempt);continue;}
+    const result=await response.json();if(response.ok){onProgress?.(100);return result as StorageUploadResult;}
+    if(response.status<500||attempt===2)throw new Error(result.error||'Photo upload failed.');await sleep(400*2**attempt);
+  }throw new Error('Photo upload failed.');
 }
-
-export async function uploadImageWithRetry({
-  uid,
-  fileId,
-  compressed,
-  onProgress,
-  signal,
-}: StorageUploadOptions): Promise<StorageUploadResult> {
-  const mediaId = fileId;
-  const mediaDocPath = `mediaObjects/${mediaId}`;
-  const downloadUrl = `/api/media/${mediaId}`;
-  const maxAttempts = 3;
-
-  if (signal?.aborted) {
-    throw new Error('Upload canceled.');
-  }
-
-  if (!db) {
-    throw new Error('Firebase is not configured.');
-  }
-
-  onProgress?.(20);
-  const arrayBuffer = await compressed.blob.arrayBuffer();
-  const payloadBytes = Bytes.fromUint8Array(new Uint8Array(arrayBuffer));
-
-  let lastError: unknown = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (signal?.aborted) {
-      throw new Error('Upload canceled.');
-    }
-
-    try {
-      onProgress?.(60);
-      await setDoc(doc(db, 'mediaObjects', mediaId), {
-        mediaId,
-        ownerId: uid,
-        contentType: compressed.contentType,
-        sizeBytes: compressed.compressedBytes,
-        width: compressed.width,
-        height: compressed.height,
-        data: payloadBytes,
-        createdAt: serverTimestamp(),
-      });
-
-      if (signal?.aborted) {
-        throw new Error('Upload canceled.');
-      }
-
-      onProgress?.(100);
-      return {
-        storagePath: mediaDocPath,
-        downloadUrl,
-        contentType: compressed.contentType,
-        sizeBytes: compressed.compressedBytes,
-      };
-    } catch (err) {
-      if (signal?.aborted) {
-        throw new Error('Upload canceled.');
-      }
-      lastError = err;
-      if (isNonRetryableFirestoreError(err)) {
-        handleFirestoreError(err, OperationType.CREATE, mediaDocPath);
-      }
-      if (attempt < maxAttempts) {
-        const backoffMs = 400 * 2 ** (attempt - 1);
-        await sleep(backoffMs);
-      }
-    }
-  }
-
-  handleFirestoreError(lastError, OperationType.CREATE, mediaDocPath);
+export async function cropPhoto(photo:CompressedImageResult,inset:number):Promise<CompressedImageResult>{
+  const bitmap=await createImageBitmap(photo.blob);try{const x=Math.round(bitmap.width*inset),y=Math.round(bitmap.height*inset),w=bitmap.width-2*x,h=bitmap.height-2*y;const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Crop unavailable.');ctx.drawImage(bitmap,x,y,w,h,0,0,w,h);const blob=await new Promise<Blob|null>(r=>canvas.toBlob(r,'image/jpeg',.85));if(!blob||blob.size>MAX_STORAGE_BYTES)throw new Error('Crop failed.');return {...photo,blob,width:w,height:h,contentType:'image/jpeg',compressedBytes:blob.size};}finally{bitmap.close();}
 }

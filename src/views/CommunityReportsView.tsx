@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../components/ProtectedImage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -441,7 +442,7 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
           'Coordinates',
           'Severity',
           'Evidence Count',
-          'Contributor',
+          'Patcher',
         ],
         [
           report.reportId,
@@ -819,7 +820,7 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
                               onClick={() => onInspectPothole(p)}
                               className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-[#E8DFC5] text-left hover:border-[#4CB729]"
                             >
-                              <img
+                              <ProtectedImage
                                 src={p.primaryPhotoUrl}
                                 alt={p.streetName}
                                 referrerPolicy="no-referrer"
@@ -999,7 +1000,7 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
                     <div key={p.potholeId} className="py-4 space-y-3">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <img
+                          <ProtectedImage
                             src={p.primaryPhotoUrl}
                             alt={p.streetName}
                             referrerPolicy="no-referrer"
@@ -1020,7 +1021,7 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                          {p.status !== 'repaired' && (
+                          {!['repaired','provisional','rejected'].includes(p.status) && (
                             <button
                               type="button"
                               disabled={busyKey === `pot_${p.potholeId}`}
@@ -1037,13 +1038,14 @@ export const CommunityReportsView: React.FC<CommunityReportsViewProps> = ({
                             </button>
                           )}
 
-                          {p.segmentConfidence !== 'verified' && (
+                          {p.status==='provisional' && <button type="button" disabled={busyKey===`pot_${p.potholeId}`} onClick={()=>void handleReviewPothole(p.potholeId,{status:'accepted',reason:'Administrator inspected and approved pending pothole photo'})} className="min-h-[38px] px-3 py-1.5 rounded-lg bg-[#4CB729] text-white text-xs font-semibold">Approve photo</button>}
+                          {!['provisional','rejected'].includes(p.status) && p.segmentConfidence !== 'verified' && (
                             <button
                               type="button"
                               disabled={busyKey === `pot_${p.potholeId}`}
                               onClick={() =>
                                 void handleReviewPothole(p.potholeId, {
-                                  status: p.status === 'provisional' ? 'accepted' : p.status,
+                                  status: p.status,
                                   jurisdiction:
                                     p.jurisdiction === 'unknown' ? 'atldot' : p.jurisdiction,
                                   segmentConfidence: 'verified',
