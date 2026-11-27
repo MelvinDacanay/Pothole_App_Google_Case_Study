@@ -1,3 +1,4 @@
+import { SharedReadCache } from './server/sharedReadCache.ts';
 import {publicPothole,publicEvidence,publicActivity} from './server/publicCommunity.ts';
 import { loadMediaBytes, storeSanitizedUpload, isReadableMedia, mediaBackend, runMediaMaintenance } from './server/mediaStore.ts';
 import { decodeUpload, PHOTO_PRIVACY_VERSION } from './server/photoPrivacy.ts';
@@ -511,7 +512,7 @@ async function startServer() {
     if (!SAFE_ID_REGEX.test(mediaId)) { res.status(400).json({error:'Invalid media ID.'}); return; }
     if (!(await requireAccountConsent(serverDb, decoded.uid, res))) return;
     if (process.env.PATCHUP_IMAGE_AI_ENABLED !== 'true' || process.env.PATCHUP_GEMINI_DATA_MODE !== 'paid') { res.status(503).json({error:'Photo verification is temporarily disabled.'}); return; }
-    const rate = checkRateLimit({scope:'verification_uid',key:decoded.uid,maxRequests:8,windowMs:60_000});
+    const rate = checkRateLimit({scope:'verification_uid',key:decoded.uid,maxRequests:3,windowMs:60_000});
     if (!rate.allowed) {res.setHeader('Retry-After',String(rate.retryAfterSeconds));res.status(429).json({error:'Please wait before checking another photo.'});return;}
     try {
       const m=(await serverDb.collection('mediaObjects').doc(mediaId).get()).data();
@@ -634,15 +635,18 @@ async function startServer() {
   });
 
   app.use('/api/community',createRateLimiter({scope:'community_read',maxRequests:60,windowMs:60_000}));
-  const communityCache=new Map<string,{until:number;items:unknown[]}>();
+  const communityCache=new SharedReadCache<unknown[]>(30_000, 2);
   app.get('/api/community/:kind',async(req,res)=>{
     const kind=req.params.kind;if(!['potholes','activity'].includes(kind)){res.sendStatus(404);return;}
     const db=getServerFirestore();if(!db){res.sendStatus(503);return;}
-    try{let cached=communityCache.get(kind);if(!cached||cached.until<Date.now()){
-      const snap=kind==='potholes'?await db.collection('potholes').where('status','in',['accepted','reported','acknowledged','repaired']).limit(150).get():await db.collection('activityFeed').where('visibility','==','public').limit(40).get();
-      const sorted=snap.docs.slice().sort((a,b)=>(b.data().createdAt?.toMillis?.()||0)-(a.data().createdAt?.toMillis?.()||0));
-      const items=kind==='potholes'?sorted.filter(d=>d.data().verificationStatus==='accepted').map(d=>publicPothole(d.id,d.data())):sorted.map(d=>publicActivity(d.id,d.data()));cached={until:Date.now()+30000,items};communityCache.set(kind,cached);
-    }res.setHeader('Cache-Control','private, max-age=30');res.json({items:cached.items});}catch{res.status(503).json({error:'Community information unavailable.'});}
+    try {
+      const items=await communityCache.get(kind,async()=>{
+        const snap=kind==='potholes'?await db.collection('potholes').where('status','in',['accepted','reported','acknowledged','repaired']).limit(150).get():await db.collection('activityFeed').where('visibility','==','public').limit(40).get();
+        const sorted=snap.docs.slice().sort((a,b)=>(b.data().createdAt?.toMillis?.()||0)-(a.data().createdAt?.toMillis?.()||0));
+        return kind==='potholes'?sorted.filter(d=>d.data().verificationStatus==='accepted').map(d=>publicPothole(d.id,d.data())):sorted.map(d=>publicActivity(d.id,d.data()));
+      });
+      res.setHeader('Cache-Control','private, max-age=30');res.json({items});
+    }catch{res.status(503).json({error:'Community information unavailable.'});}
   });
 
   app.get('/api/potholes/:potholeId/submissions', async (req, res) => {

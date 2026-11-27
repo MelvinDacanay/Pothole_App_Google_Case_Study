@@ -63,3 +63,12 @@ test('account consent requires both explicit confirmations and current version',
   assert.equal(consentAccepted(null), false);
   assert.equal(consentAccepted({ageConfirmed:true, aiConsent:true, version:'old'}), false);
 });
+
+test('durable per-user minute ceiling and invalid counters fail closed before inference',async()=>{
+  settings();const db=new StrictDb();let calls=0;const p=provider(()=>calls++);
+  process.env.PATCHUP_AI_USER_MINUTE_LIMIT='0';
+  try{const v=await verify(db,'u1','med1',fixture(),p);assert.equal(v.failureCategory,'quota');assert.equal(calls,0);}
+  finally{delete process.env.PATCHUP_AI_USER_MINUTE_LIMIT;}
+  const day=new Date().toISOString().slice(0,10);db.put(`verificationBudgets/day_${day}`,{count:'corrupt'});
+  const v=await verify(db,'u2','med2',fixture(2),p);assert.equal(v.failureCategory,'quota');assert.equal(calls,0);
+});
