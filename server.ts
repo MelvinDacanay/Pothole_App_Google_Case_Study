@@ -193,13 +193,6 @@ function resolveBrowserMapsApiKey(): string {
   );
 }
 
-function resolveServerMapsApiKey(): string {
-  return (
-    process.env.GOOGLE_MAPS_SERVER_API_KEY ||
-    ''
-  );
-}
-
 async function verifyBearerToken(
   req: express.Request,
   res: express.Response,
