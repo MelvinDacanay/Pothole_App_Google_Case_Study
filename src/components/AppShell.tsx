@@ -1,19 +1,22 @@
 import React from 'react';
-import { Award, Camera, Gamepad2, Home, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { Award, Camera, FolderOpen, Gamepad2, Home, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 import { useAuth } from '../context/AuthContext';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { OfflineBanner } from './OfflineBanner';
 
-export type NavTab = 'home' | 'map' | 'capture' | 'leaderboard' | 'arcade' | 'profile' | 'admin';
+export type NavTab = 'home' | 'map' | 'capture' | 'cases' | 'leaderboard' | 'arcade' | 'profile' | 'admin';
 
 interface AppShellProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
+  onViewCase?: (caseId: string) => void;
   children: React.ReactNode;
 }
 
 const DESKTOP_NAV_ITEMS: { id: NavTab; label: string; mobileLabel: string; icon: React.FC<{ className?: string }> }[] = [
   { id: 'home', label: 'Home', mobileLabel: 'Home', icon: Home },
+  { id: 'cases', label: 'My Cases', mobileLabel: 'Cases', icon: FolderOpen },
   { id: 'leaderboard', label: 'Leaderboard', mobileLabel: 'Ranks', icon: Award },
   { id: 'arcade', label: 'Arcade', mobileLabel: 'Arcade', icon: Gamepad2 },
   { id: 'profile', label: 'Profile', mobileLabel: 'Profile', icon: UserIcon },
@@ -21,14 +24,22 @@ const DESKTOP_NAV_ITEMS: { id: NavTab; label: string; mobileLabel: string; icon:
 
 const MOBILE_NAV_ITEMS: typeof DESKTOP_NAV_ITEMS = [
   { id: 'home', label: 'Home', mobileLabel: 'Home', icon: Home },
+  { id: 'cases', label: 'My Cases', mobileLabel: 'Cases', icon: FolderOpen },
   { id: 'leaderboard', label: 'Leaderboard', mobileLabel: 'Ranks', icon: Award },
   { id: 'capture', label: 'Capture', mobileLabel: 'Snap', icon: Camera },
   { id: 'arcade', label: 'Arcade', mobileLabel: 'Arcade', icon: Gamepad2 },
   { id: 'profile', label: 'Profile', mobileLabel: 'Profile', icon: UserIcon },
 ];
 
-export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, children }) => {
+export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, onViewCase, children }) => {
   const { user, publicProfile, isSigningIn, signIn, isAdmin } = useAuth();
+  const bell = user ? (
+    <NotificationBell
+      user={user}
+      onViewCase={(caseId) => onViewCase?.(caseId)}
+      onReviewFriends={() => onSelectTab('profile')}
+    />
+  ) : null;
 
   return (
     <div className="patchup-shell min-h-dvh flex flex-col bg-[#F7F7F8] text-[#3A3535]">
@@ -74,7 +85,8 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
             })}
           </nav>
 
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-2">
+            {bell}
             {user ? (
               <button
                 type="button"
@@ -119,6 +131,8 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
           </button>
 
           {user ? (
+            <div className="flex items-center gap-1">
+            {bell}
             <button
               type="button"
               onClick={() => onSelectTab('profile')}
@@ -140,6 +154,7 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onSelectTab, chil
                 @{publicProfile?.username || 'profile'}
               </span>
             </button>
+            </div>
           ) : (
             <button
               type="button"

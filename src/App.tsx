@@ -9,6 +9,10 @@ import { MapView } from './views/MapView';
 import { CaptureView } from './views/CaptureView';
 import { LeaderboardView } from './views/LeaderboardView';
 import { ProfileView } from './views/ProfileView';
+import { CasesView } from './views/CasesView';
+import { CaseDetailView } from './views/CaseDetailView';
+import { EscalateView } from './views/EscalateView';
+import { PublicProfileView } from './views/PublicProfileView';
 import { MinigamesView } from './views/MinigamesView';
 import { LandingView } from './views/LandingView';
 import { firebaseClientConfigured } from './lib/firebase';
@@ -57,6 +61,9 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, ErrorBou
 function AppExperience() {
   const { authReady, user, signOut, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('home');
+  const [subView, setSubView] = useState<'none' | 'caseDetail' | 'escalate' | 'publicProfile'>('none');
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [selectedProfileUid, setSelectedProfileUid] = useState<string | null>(null);
   const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
   const [selectedPothole, setSelectedPothole] = useState<PotholeRecord | null>(null);
   const [pendingFocusPotholeId, setPendingFocusPotholeId] = useState<string | null>(null);
@@ -73,7 +80,24 @@ function AppExperience() {
 
   const handleSelectTab = (tab: NavTab) => {
     if (tab === 'admin' && !isAdmin) return;
+    setSubView('none');
     setActiveTab(tab);
+  };
+
+  const handleOpenCase = (caseId: string) => {
+    setSelectedCaseId(caseId);
+    setSubView('caseDetail');
+    setActiveTab('cases');
+  };
+
+  const handleEscalateCase = (caseId: string) => {
+    setSelectedCaseId(caseId);
+    setSubView('escalate');
+  };
+
+  const handleOpenProfile = (uid: string) => {
+    setSelectedProfileUid(uid);
+    setSubView('publicProfile');
   };
 
   const handleInspectPothole = (pothole: PotholeRecord) => {
@@ -133,7 +157,19 @@ function AppExperience() {
           <LandingView />
         ) : (
         <AccountConsentGate key={user.uid} user={user} signOut={signOut}>
-        <AppShell activeTab={activeTab} onSelectTab={handleSelectTab}>
+        <AppShell activeTab={activeTab} onSelectTab={handleSelectTab} onViewCase={handleOpenCase}>
+          {subView === 'caseDetail' && selectedCaseId ? (
+            <CaseDetailView
+              caseId={selectedCaseId}
+              onBack={() => setSubView('none')}
+              onEscalate={handleEscalateCase}
+            />
+          ) : subView === 'escalate' && selectedCaseId ? (
+            <EscalateView caseId={selectedCaseId} onBack={() => setSubView('caseDetail')} />
+          ) : subView === 'publicProfile' && selectedProfileUid ? (
+            <PublicProfileView uid={selectedProfileUid} onBack={() => setSubView('none')} />
+          ) : (
+            <>
               {activeTab === 'home' && (
                 <HomeView
                   onNavigate={handleSelectTab}
@@ -151,6 +187,7 @@ function AppExperience() {
                     setPreselectedEvidenceTarget(null);
                     handleSelectTab('capture');
                   }}
+                  onOpenCase={handleOpenCase}
                 />
               )}
               {activeTab === 'capture' && (
@@ -160,14 +197,19 @@ function AppExperience() {
                   onSubmittedToMap={handleSubmittedToMap}
                 />
               )}
+              {activeTab === 'cases' && (
+                <CasesView onOpenCase={handleOpenCase} onEscalate={handleEscalateCase} />
+              )}
               {activeTab === 'admin' && isAdmin && <AdminHubView />}
-              {activeTab === 'leaderboard' && <LeaderboardView />}
+              {activeTab === 'leaderboard' && <LeaderboardView onOpenProfile={handleOpenProfile} />}
               {activeTab === 'arcade' && <MinigamesView />}
               {activeTab === 'profile' && (
                 <ProfileView
                   onOpenGames={() => handleSelectTab('arcade')}
                 />
               )}
+            </>
+          )}
         </AppShell>
         </AccountConsentGate>
         )}

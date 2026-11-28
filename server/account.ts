@@ -39,6 +39,15 @@ export async function deleteUserAccountAndPersonalData(params: {
     serverDb.collection('achievements').doc(uid).collection('badges')
   );
 
+  for (;;) {
+    const caseSnap = await serverDb.collection('potholeCases').where('userId', '==', uid).limit(200).get();
+    if (caseSnap.empty) break;
+    const batch = serverDb.batch();
+    for (const caseDoc of caseSnap.docs) batch.delete(caseDoc.ref);
+    await batch.commit();
+    deletedPersonalDocs += caseSnap.size;
+  }
+
   // 2. Delete friendships involving uid
   const friendshipsSnap = await serverDb
     .collection('friendships')

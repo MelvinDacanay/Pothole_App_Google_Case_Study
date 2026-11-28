@@ -1,5 +1,6 @@
 import { hasRedaction, redactionEnabled } from './server/photoRedaction.ts';
-import { COMMUNITY_NOTIFICATION_TYPES, isCommunityNotification } from './src/lib/communityNotifications.ts';
+import { CASE_NOTIFICATION_TYPES, COMMUNITY_NOTIFICATION_TYPES, isReadableNotification } from './src/lib/communityNotifications.ts';
+import { registerCaseRoutes } from './server/caseRoutes.ts';
 import { isIndependentRecord, reportsEnabled, exportRows, isNewReportGroup } from './server/locationPolicy.ts';
 import { SharedReadCache } from './server/sharedReadCache.ts';
 import {publicPothole,publicEvidence,publicActivity,canDisplayPothole,isPublicActivity} from './server/publicCommunity.ts';
@@ -1248,8 +1249,8 @@ async function startServer() {
     try {
       const itemsCol = serverDb.collection('notifications').doc(decoded.uid).collection('items');
       if (markAll) {
-        const unreadSnap = await itemsCol.where('read', '==', false).where('type','in',[...COMMUNITY_NOTIFICATION_TYPES]).limit(50).get();
-        const visible=unreadSnap.docs.filter(d=>isCommunityNotification(d.data().type));
+        const unreadSnap = await itemsCol.where('read', '==', false).where('type','in',[...COMMUNITY_NOTIFICATION_TYPES, ...CASE_NOTIFICATION_TYPES]).limit(50).get();
+        const visible=unreadSnap.docs.filter(d=>isReadableNotification(d.data().type));
         if (visible.length) {
           const batch = serverDb.batch();
           visible.forEach((d) => {
@@ -1267,7 +1268,7 @@ async function startServer() {
       }
 
       const item=await itemsCol.doc(notificationId).get();
-      if(!isCommunityNotification(item.data()?.type)){res.status(404).json({error:'Notification not available.'});return;}
+      if(!isReadableNotification(item.data()?.type)){res.status(404).json({error:'Notification not available.'});return;}
       await itemsCol.doc(notificationId).update({
         read: true,
         updatedAt: FieldValue.serverTimestamp(),
@@ -1901,6 +1902,12 @@ async function startServer() {
         error: err instanceof Error ? err.message : 'Unable to complete account deletion.',
       });
     }
+  });
+
+  registerCaseRoutes(app, {
+    verifyBearerToken,
+    getServerFirestore,
+    isFirestoreReady: () => adminFirestoreReady,
   });
 
   // Catch-all for unknown /api routes so SPA fallback never masks API 404s

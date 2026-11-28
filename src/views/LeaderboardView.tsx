@@ -23,7 +23,7 @@ interface LeaderboardEntry {
   overallEvidenceCount: number;
 }
 
-export const LeaderboardView: React.FC = () => {
+export const LeaderboardView: React.FC<{ onOpenProfile?: (uid: string) => void }> = ({ onOpenProfile }) => {
   const { user, isSigningIn, signIn } = useAuth();
   const { badges, loading: loadingBadges } = useAchievements(user);
 
@@ -195,9 +195,19 @@ export const LeaderboardView: React.FC = () => {
                         </span>
                       )}
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-[#2D2B35] truncate">
-                          {entry.displayName}
-                        </div>
+                        {onOpenProfile ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenProfile(entry.uid)}
+                            className="text-sm font-semibold text-[#2D2B35] truncate hover:underline text-left"
+                          >
+                            {entry.displayName}
+                          </button>
+                        ) : (
+                          <div className="text-sm font-semibold text-[#2D2B35] truncate">
+                            {entry.displayName}
+                          </div>
+                        )}
                         <div className="text-xs text-[#6E6978] font-mono truncate">
                           @{entry.username} · {entry.evidenceScore} evidence
                           {entry.shareNeighborhood && entry.neighborhood
