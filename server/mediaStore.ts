@@ -1,3 +1,4 @@
+import { hasRedaction, redactWithGoogle, redactionFields, type PhotoRedactor } from './photoRedaction.ts';
 import { getApps } from 'firebase-admin/app';
 import { getStorage } from 'firebase-admin/storage';
 import { FieldValue, Timestamp, type Firestore, type DocumentData } from 'firebase-admin/firestore';
@@ -100,24 +101,26 @@ function uploadResult(mediaId:string,m:MediaData) {return {storagePath:`mediaObj
 export function mediaFields(clean:Awaited<ReturnType<typeof sanitizePhoto>>) {
   return {contentType:clean.mime,width:clean.width,height:clean.height,sizeBytes:clean.bytes.length,thumbnailBytes:clean.thumbnail.length,imageHash:clean.imageHash,contentHash:clean.contentHash,thumbnailHash:clean.thumbnailHash,sanitizerVersion:SANITIZER_VERSION};
 }
-// Server-only upload. Per-ID request hashes are immutable; retries do not reserve a second quota.
-export async function storeSanitizedUpload(db:Firestore,p:{uid:string;mediaId:string;bytes:Buffer;mime:string}) {
+// Server-only upload. Ready uploads are idempotent; unfinished/concurrent redaction attempts may consume additional DLP quota.
+export async function storeSanitizedUpload(db:Firestore,p:{uid:string;mediaId:string;bytes:Buffer;mime:string}, redact:PhotoRedactor=redactWithGoogle) {
   if(!MEDIA_ID.test(p.mediaId))throw new Error('Invalid photo ID.');
   const requestHash=hashBytes(p.bytes), ref=db.collection('mediaObjects').doc(p.mediaId), now=Date.now();
   const previous=(await ref.get()).data();
-  if(previous){if(previous.ownerId!==p.uid||previous.uploadRequestHash!==requestHash)throw new Error('Photo ID already used.');if(canonical(previous))return uploadResult(p.mediaId,previous);}
-  const clean=await sanitizePhoto(p.bytes,p.mime), fields=mediaFields(clean);
+  if(previous){if(previous.ownerId!==p.uid||previous.uploadRequestHash!==requestHash)throw new Error('Photo ID already used.');if(p.mediaId.startsWith('med_')&&!hasRedaction(previous))throw new Error('Select the photo again for privacy protection.');if(canonical(previous))return uploadResult(p.mediaId,previous);}
+  const isPothole=p.mediaId.startsWith('med_');
+  const sanitized=await sanitizePhoto(p.bytes,p.mime);
+  const clean=isPothole?await redact(db,p.uid,sanitized):sanitized, fields=mediaFields(clean);
   const storageBackend=previous?.storageBackend||mediaBackend();
   if(storageBackend!=='gcs'&&storageBackend!=='firestore')throw new Error('Invalid storage configuration.');
   if(storageBackend==='gcs')bucket(); // fail before reservation if no bucket name
   const day=new Date(now).toISOString().slice(0,10),month=day.slice(0,7),size=clean.bytes.length+clean.thumbnail.length;
   const quotaRefs=[db.collection('mediaBudgets').doc(`user_${hashBytes(p.uid)}_${day}`),db.collection('mediaBudgets').doc(`day_${day}`),db.collection('mediaBudgets').doc(`month_${month}`),db.collection('mediaBudgets').doc(`allocated_${storageBackend}`)];
   const caps=[boundedInt(process.env.PATCHUP_UPLOAD_USER_DAILY_LIMIT,10,1000),boundedInt(process.env.PATCHUP_UPLOAD_DAILY_LIMIT,100,10000),boundedInt(process.env.PATCHUP_UPLOAD_MONTHLY_LIMIT,1000,100000),boundedInt(process.env.PATCHUP_MEDIA_MAX_NEW_BYTES,storageBackend==='gcs'?3_000_000_000:250_000_000,4_000_000_000)];
-  const record={...fields,mediaId:p.mediaId,ownerId:p.uid,privacyVersion:PHOTO_PRIVACY_VERSION,uploadRequestHash:requestHash,sourceContentHash:prepareImage(p.bytes,p.mime).contentHash,storageBackend,createdAt:FieldValue.serverTimestamp(),cleanupAfter:Timestamp.fromMillis(now+DAY)};
+  const record={...fields,...(isPothole?redactionFields(clean.imageHash):{}),mediaId:p.mediaId,ownerId:p.uid,privacyVersion:PHOTO_PRIVACY_VERSION,uploadRequestHash:requestHash,sourceContentHash:prepareImage(p.bytes,p.mime).contentHash,storageBackend,createdAt:FieldValue.serverTimestamp(),cleanupAfter:Timestamp.fromMillis(now+DAY)};
   const reservation=await db.runTransaction(async tx=>{
     const [old,retired,...q]=await Promise.all([tx.get(ref),tx.get(db.collection('mediaRetired').doc(p.mediaId)),...quotaRefs.map(r=>tx.get(r))]);
     if(retired.exists)throw new Error('Photo expired. Select it again.');
-    if(old.exists){const m=old.data()!;if(m.ownerId!==p.uid||m.uploadRequestHash!==requestHash||m.imageHash!==clean.imageHash||m.storageBackend!==storageBackend)throw new Error('Photo ID already used.');if(canonical(m))return {done:true,m};if(m.state!=='pending'||Number(m.cleanupAfter?.toMillis?.()||0)<=now)throw new Error('Photo upload expired.');return {done:false,m};}
+    if(old.exists){const m=old.data()!;if(isPothole&&!hasRedaction(m))throw new Error('Select the photo again for privacy protection.');if(m.ownerId!==p.uid||m.uploadRequestHash!==requestHash||m.imageHash!==clean.imageHash||m.storageBackend!==storageBackend)throw new Error('Photo ID already used.');if(canonical(m))return {done:true,m};if(m.state!=='pending'||Number(m.cleanupAfter?.toMillis?.()||0)<=now)throw new Error('Photo upload expired.');return {done:false,m};}
     if(q.some((v,i)=>Number(v.data()?.count||0)+(i===3?size:1)>caps[i]))throw new Error('Photo storage or upload allowance reached. Try again later.');
     quotaRefs.forEach((r,i)=>tx.set(r,{count:FieldValue.increment(i===3?size:1),...(i===0?{ownerId:p.uid}:{}),...(i<3?{expiresAt:Timestamp.fromMillis(now+(i===2?62:2)*DAY)}:{})},{merge:true}));
     if(storageBackend==='firestore'){const m={...record,state:'ready',data:clean.bytes,thumbnailData:clean.thumbnail};tx.create(ref,m);return {done:true,m};}

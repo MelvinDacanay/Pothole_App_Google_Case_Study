@@ -987,7 +987,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
           <h3 className="font-bold">Review your photo before uploading</h3>
           <p className="text-sm">Check the preview for faces, license plates, house numbers or other personal details. Crop closer to the pothole or replace the photo if needed.</p>
           <button type="button" disabled={cropping} className="border rounded-lg px-3 py-2" onClick={async()=>{const seq=photoSeqRef.current;setCropping(true);setPrivacyChecked(false);try{const cropped=await cropPhoto(compressedPhoto,.1);if(seq!==photoSeqRef.current)return;if(previewRef.current)URL.revokeObjectURL(previewRef.current);const url=URL.createObjectURL(cropped.blob);previewRef.current=url;setPreviewUrl(url);setCompressedPhoto(cropped);}catch{setUploadError('Could not crop this photo. Retake or replace it.');}finally{setCropping(false);}}}>Crop 10% from each edge</button>
-          <label className="flex gap-2 text-sm"><input type="checkbox" checked={privacyChecked} onChange={e=>setPrivacyChecked(e.target.checked)}/> I checked this photograph and removed visible personal details.</label>
+          <label className="flex gap-2 text-sm"><input type="checkbox" checked={privacyChecked} onChange={e=>setPrivacyChecked(e.target.checked)}/> I checked this photograph and removed visible personal details. Google will also attempt to obscure faces and license plates before photo verification.</label>
           <button type="button" disabled={!privacyChecked||cropping} onClick={()=>void startUpload(compressedPhoto)} className="bg-[#2D2B35] text-white rounded-lg px-4 py-3 disabled:opacity-50">Upload and check photo</button>
         </div>}
       </section>

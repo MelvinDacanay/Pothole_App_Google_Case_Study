@@ -1,3 +1,5 @@
+import {redactionFields} from '../server/photoRedaction.ts';
+import {prepareImage} from '../server/imageBytes.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,7 +27,7 @@ test('real local Firestore emulator: concurrent manual approvals and exact-image
 
   try {
     await db.collection('users').doc(uid).set({ username: 'tester', displayName: 'Tester', distinctPotholeCount: 0, evidenceCount: 0, potholesCollectedCount: 0 });
-    await db.collection('mediaObjects').doc(mediaId).set({ ownerId: uid, contentType: 'image/jpeg', data: fixture });
+    await db.collection('mediaObjects').doc(mediaId).set({ ownerId: uid, contentType: 'image/jpeg', data: fixture, ...redactionFields(prepareImage(fixture,'image/jpeg').imageHash) });
     const v = await verifyImage(db, { uid, mediaId, bytes: fixture, mime: 'image/jpeg', consent: false });
     const p: SubmissionInput = { uid, mediaId, submissionId, verificationId: v.verificationId, requestedAction: 'provisional_review', actionType: 'provisional_review', targetPotholeId: '', lat: 33.75, lng: -84.39, coordinateSource: 'manual_pin', streetSource:'user_observed', formattedAddress: 'Example St', streetName: 'Example St', normalizedStreet: 'example st', neighborhood: '', city: 'Atlanta', state: 'GA', postalCode: '', placeId: '', jurisdiction: 'atldot', locationUserCorrected: false, notes: '', duplicateConfidence: 0, candidatePotholeIds: [] };
     const a = await commitVerifiedSubmission(db, p);
@@ -89,7 +91,7 @@ test('real local Firestore emulator: upload metadata removal, legacy photo fallb
 
     // 2. Store via server storeSanitizedUpload (Firestore backend)
     process.env.PATCHUP_MEDIA_STORAGE = 'firestore';
-    const uploadRes = await storeSanitizedUpload(db, { uid, mediaId, bytes: rawPhoto, mime: 'image/jpeg' });
+    const uploadRes = await storeSanitizedUpload(db, { uid, mediaId, bytes: rawPhoto, mime: 'image/jpeg' }, async (_db,_uid,clean)=>clean);
     assert.equal(uploadRes.contentType, 'image/jpeg');
 
     const storedDoc = (await db.collection('mediaObjects').doc(mediaId).get()).data()!;
@@ -122,7 +124,7 @@ test('real local Firestore emulator: upload metadata removal, legacy photo fallb
     delete process.env.PATCHUP_MEDIA_BUCKET;
     process.env.PATCHUP_MEDIA_STORAGE = 'gcs';
     await assert.rejects(
-      storeSanitizedUpload(db, { uid, mediaId: `med_gcs_${id}`, bytes: rawPhoto, mime: 'image/jpeg' }),
+      storeSanitizedUpload(db, { uid, mediaId: `med_gcs_${id}`, bytes: rawPhoto, mime: 'image/jpeg' }, async (_db,_uid,clean)=>clean),
       /Private media bucket is not configured/
     );
     process.env.PATCHUP_MEDIA_STORAGE = 'firestore';

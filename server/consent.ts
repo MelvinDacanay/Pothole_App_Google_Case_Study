@@ -1,6 +1,6 @@
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 
-export const CONSENT_VERSION = '2026-11-27-v3-location';
+export const CONSENT_VERSION = '2026-11-27-v4-redaction';
 export function consentAccepted(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;

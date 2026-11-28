@@ -17,7 +17,7 @@ export function publicVerification(v: VerificationRecord) {
 }
 
 type CacheRecord = { state:'pending'|'completed'|'unavailable'; lease:string; leaseUntilMs:number; result:ProviderResult|null; expiresAtMs:number; retryAfterMs:number };
-export async function verifyImage(db: Firestore, p: {uid:string; mediaId:string; bytes:Buffer; mime:string; consent:boolean}, provider: ImageClassifier = geminiClassifier): Promise<VerificationRecord> {
+export async function verifyImage(db: Firestore, p: {uid:string; mediaId:string; bytes:Buffer; mime:string; consent:boolean;redactedImageHash?:string}, provider: ImageClassifier = geminiClassifier): Promise<VerificationRecord> {
   const prepared=prepareImage(p.bytes,p.mime), now=Date.now(), model=modelId();
   const baseKey=hashBytes(JSON.stringify([p.uid,prepared.contentHash,releaseId(model)]));
   const cacheRef=db.collection('imageAnalysisCache').doc(baseKey);
@@ -39,7 +39,7 @@ export async function verifyImage(db: Firestore, p: {uid:string; mediaId:string;
     const existing=old.data() as VerificationRecord|undefined;
     if(existing?.consumedSubmissionId) throw new Error('This photo was already submitted.');
     if(existing?.verificationState==='pending'&&now-existing.createdAtMs<60_000) return {kind:'busy' as const};
-    if(process.env.PATCHUP_IMAGE_AI_ENABLED!=='true'||!p.consent||model!==APPROVED_GEMINI_MODEL) {const v=makeRecord({ok:false,failure:'disabled'},now);persist(tx,v);return {kind:'done' as const,v};}
+    if(process.env.PATCHUP_IMAGE_AI_ENABLED!=='true'||!p.consent||model!==APPROVED_GEMINI_MODEL||p.redactedImageHash!==prepared.imageHash) {const v=makeRecord({ok:false,failure:'disabled'},now);persist(tx,v);return {kind:'done' as const,v};}
     const c=cache.data() as CacheRecord|undefined;
     if(c?.state==='pending'&&c.leaseUntilMs>now) return {kind:'busy' as const};
     if(c?.result && ((c.state==='completed'&&c.expiresAtMs>now)||(c.state==='unavailable'&&c.retryAfterMs>now))) {
@@ -58,7 +58,7 @@ export async function verifyImage(db: Firestore, p: {uid:string; mediaId:string;
   if(reserved.kind==='done') return reserved.v;
   if(reserved.kind==='busy') throw new Error('An image check is already running. Retry shortly.');
   let result:ProviderResult;
-  try {result=await provider.classify({bytes:prepared.bytes,mime:prepared.mime,model});if(result.ok) result={...result,observation:validateObservation(result.observation)};} catch {result={ok:false,failure:'invalid_response'};}
+  try {result=await provider.classify({bytes:prepared.bytes,mime:prepared.mime,model,redactedImageHash:p.redactedImageHash});if(result.ok) result={...result,observation:validateObservation(result.observation)};} catch {result={ok:false,failure:'invalid_response'};}
   const done=Date.now(), v=makeRecord(result,done);
   return db.runTransaction(async tx=>{
     const [cache,old,circuit]=await Promise.all([tx.get(cacheRef),tx.get(ref),tx.get(circuitRef)]);
