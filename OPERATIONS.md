@@ -1,146 +1,55 @@
-> **Image verification v2:** Read [README.md](README.md) and [docs/IMAGE_VERIFICATION.md](docs/IMAGE_VERIFICATION.md) for new server-owned records, disabled-by-default acceptance, test limitations, quota settings, and coordinated deployment. They supersede older image-verification instructions below.
+# PatchUp production operations
 
-# PatchUp Operations, Deployment & Security Runbook
+Main is the production source baseline, not proof of deployment. No release is authorized by this runbook. Current infrastructure inventory (operator-verified November 27, 2026; recheck before use):
 
-## 1. Architecture & Runtime Boundary
+| Resource | Configuration |
+| --- | --- |
+| Project / database | patchup-fff96 / (default), us-east1 |
+| Runtime | patchup-backend@patchup-fff96.iam.gserviceaccount.com |
+| Builder | patchup-build@patchup-fff96.iam.gserviceaccount.com |
+| Image repository | us-east1-docker.pkg.dev/patchup-fff96/patchup-production |
+| Build source staging | gs://patchup-fff96-build-source-884267611225; private, one-day lifecycle, soft delete disabled |
+| Runtime secrets | patchup-gemini-api-key (version 1 enabled); existing Maps Server secret retained but not consumed by current backend |
+| Cloud Run | No application deployed at inventory date |
 
-PatchUp runs as a unified full-stack Node.js/Express application (`server.ts`) serving both the protected `/api/*` backend and the compiled Vite PWA frontend (`dist/`) on a single origin (default port `3000`).
+Run, Cloud Build, Artifact Registry, Secret Manager and DLP APIs are enabled; Vertex AI and Cloud Functions remain disabled. Billing is linked. Monthly alert budget $10 is not a hard ceiling; service spending caps $3 Gemini and $2 Cloud Run are configured separately and may have enforcement delays. Other services can incur costs. Verify current settings before release; do not recreate infrastructure blindly.
 
-- **Frontend**: React + TypeScript + Tailwind CSS + `vite-plugin-pwa` (Workbox service worker, `manifest.webmanifest`, offline shell fallback).
-- **Backend**: Express (`server.ts`) + Firebase Admin SDK (`firebase-admin/app`, `firebase-admin/auth`, `firebase-admin/firestore`) + modular domain engines in `server/`:
-  - `server/geo.ts`: Haversine distance, street normalization, ATLDOT/GDOT heuristic jurisdiction classification, geographic distance and duplicate candidate scoring.
-  - `server/segments.ts`: Road-aligned corridor grouping, transactional 5-distinct-pothole threshold & report-cycle engine, admin overrides, and audit logging.
-  - `server/social.ts`: Friendships, server-maintained leaderboards, 7 community achievements, and notifications.
-  - `server/games.ts`: Isolated entertainment minigame score validation & `/gameStats` persistence.
-  - `server/rateLimit.ts`: Bounded in-memory rate limiting for expensive/mutating routes.
-  - `server/account.ts`: User-initiated personal account deletion with community corridor preservation.
-- **Database**: Cloud Firestore (`projectId: patchup-fff96`, `databaseId: (default)`).
-- **Media Storage**: Spark-tier `$0` isolated `/mediaObjects/{mediaId}` binary store (`<= 400KB`, `<= 1280x1280`) streamed via `/api/media/:mediaId`.
+## Source and build
 
----
+Use a reviewed main commit, clean checkout, Node 24.22.3, npm ci and full CI checks. Do not use old archives. Prepare or obtain the approved Census dataset per [data/README.md](data/README.md). The Dockerfile requires the pinned checksum and includes the file in the runtime. Generated data stays outside Git; distribute the approved artifact and checksum to authorized builders. Explicitly include the file and tracked checksum in the source archive even though Git ignores the JSON. Exclude .git, .env, credentials and real benchmark photos. Inspect the archive before uploading. For Cloud Build directory uploads, the explicit `.gcloudignore` allowlist includes the dataset and checksum; review actual upload contents before building.
 
-## 2. Environment Variables & Secrets Management
+Build using the dedicated builder explicitly (not the default Compute identity); use Cloud Logging-only build logs and the private staging bucket. Provide VITE_FIREBASE_API_KEY and VITE_GOOGLE_MAPS_API_KEY as public restricted build args. Never pass server keys or ADC files to Docker. Approved team members can act as the builder and backend; source upload permissions must be verified separately. Use immutable image digests for releases and configure reviewed registry cleanup policies before accumulating images. Build and runtime permissions are separate; technical deployers can indirectly exercise runtime privileges and incur costs.
 
-Never commit `.env`, service account JSON files, or API keys to source control. Reference `.env.example` for variable names:
+## Runtime configuration
 
-| Variable | Scope | Storage Recommendation | Purpose |
-| --- | --- | --- | --- |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Server only | Secure development environment only | Optional development Firebase credential; rejected on Cloud Run |
-| `VITE_GOOGLE_MAPS_API_KEY` | Browser bundle | HTTP-referrer restricted Cloud API key | Maps JavaScript API (`MapView`, `PinPickerMap`) |
-| `GEMINI_API_KEY` | Server only | Secret Manager / AI Studio Secrets | Optional strict pothole observation (`@google/genai`); see `docs/IMAGE_VERIFICATION.md` |
-| `GEMINI_MODEL` | Server only | Env var (e.g. `gemini-3.5-flash-lite`) | Verifiable Gemini model identifier |
-| `PATCHUP_ADMIN_EMAILS` | Server only | Env var | Authoritative comma-separated allowlist for all application admin operations |
-| `APP_URL` | Server | Runtime env | Public HTTPS deployment URL |
-| `PORT` | Server | Runtime env (`3000`) | Listening HTTP port |
+Use `deploy/cloud-run.service.yaml` as a reviewable template; replace IMAGE_URI with the reviewed digest and the approved administrator/report mailbox placeholders, not secret values. Cloud Run: us-east1, 1 CPU, 1 GiB, min 0/max 1, concurrency 10, timeout 60s, port 3000, request-based billing. Start private; verify invoker IAM separately. Keep Firebase ADC keyless; startup rejects exported credentials and incorrect identity. Gemini secret is injected only at runtime. Google reverse geocoding uses metadata OAuth, not a server API key. Configure restricted browser referrers and Firebase authorized domains for the real deployment URL. Retain old credentials until dependencies are verified. Do not set development ADC or emulator variables in the runtime.
 
-**Google Workspace OAuth (Community Sheets Export)**: Uses client-side Google Identity Services (`initTokenClient`) with in-memory-only access tokens (`https://www.googleapis.com/auth/spreadsheets`). Zero client secrets are stored on the server or browser storage.
+**Current release limitation:** disabling image AI or paid mode returns HTTP 503 before issuing a verification ID. New Capture submissions require that ID even for manual review. Existing eligible pending reviews may still be processed. The safe initial runtime is for controlled validation, not an operational manual-only launch. Do not bypass authorization to work around this.
 
----
+The `.env.example` is for local development. The Cloud Run template is the reviewed initial runtime contract. Populate the current approved server-only administrator allowlist and reporting mailbox outside Git. An omitted allowlist denies admin access; explicitly setting an empty/changed list can reconcile existing enrollments and revoke sessions. See [production identity](docs/PRODUCTION_IDENTITY.md).
 
-## 3. Build, Lint & Automated Verification Commands
+## Data and cost controls
 
-Before every release, run the full verification suite:
+| Operation | Initial application limits (UTC windows) |
+| --- | --- |
+| Gemini | 10/min, 100/day, 3000/month, 3/min and 25/day per user; fixed standard model |
+| Uploads | 10/user/day, 100/day, 1000/month |
+| New Firestore media allocation | 250,000,000 bytes cumulative |
+| Submissions | 25/user/day |
+| DLP | 10/min, 100/day, 1000/month, 10/user/day, 400,000,000 input bytes/month |
+| Optional Google preview | 20/min, 100/day, 3000/month, 5/min and 25/day per user |
 
-```bash
-# 1. TypeScript typecheck
-npm run lint
+Reservations may count failed attempts; these are not dollar ceilings. Provider quota configuration is separate: standard Gemini 10/min and 100/day for approved model; Maps JS 30/min and 150/day; Geocoding v4 reverse 20/min and 100/day; DLP image scans 10/min. Other provider quota classes may remain available. Monitor actual usage, Firestore reads/writes, image storage, network and logs. The per-instance public reads cache is not a global Firestore spending limit. Do not reset counters to circumvent limits.
 
-# 2. Firestore Security Rules static lint
-npm run lint:rules
+Default media storage is Firestore; GCS migration and maintenance are opt-in, not performed at merge. Preserve historical evidence, withhold unredacted pothole photos and unknown-origin locations; never invent proof. Review [privacy/storage](docs/PHOTO_PRIVACY_STORAGE.md) and [location provenance](docs/LOCATION_PROVENANCE.md).
 
-# 3. Automated unit, security-audit, geo edge-case, and game integrity tests
-npm test
+## Release gates (all operator actions; deployment paused)
 
-# 4. Production Vite + PWA Workbox bundle
-npm run build
+1. Review CI, clean native build, container contents, secrets and identity; verify effective IAM, costs, browser restrictions and domains. Confirm external hosting has no automatic deployment triggered by a main-branch merge.
+2. Test matched server/frontend/rules in isolated staging. Production-specific identity and DLP routing need explicit staging adaptation before real uploads. Review existing Firestore indexes rather than replacing blindly. Deploy rules and matching application only after explicit authorization. Retire unsafe legacy endpoints.
+3. Verify `/api/health`, signed-in and anonymous access, allowlist revocation, photo and thumbnail redaction including detector failure, GPS/pin changes, independent street lookup, duplicate handling, Home attribution, pending review, leaderboard, arcade, account deletion and private Admin Hub reports. Do not send real ATL311 messages in tests.
+4. Review legacy data and legal/support disclosures; leave city lookup and Google preview off until rights and validation are approved. Leave history audit flag false until actual remediation.
+5. Enable paid Gemini image processing only after explicit provider/privacy review, then benchmark reviewed pre-redacted fixtures. Automatic acceptance requires exact current approval version and separate sign-off. Never bypass redaction or fabricate benchmark approval. The CLI bypasses application budgets; respect provider quotas and spread evaluation over approved quota windows.
+6. Public access is a separate decision. Roll back only to a safe compatible revision; otherwise stop uploads/admin traffic and forward-fix. Never restore client-trusting, claim-authorizing or unredacted media paths.
 
-# 5. Production server start
-NODE_ENV=production npm start
-```
-
-Inspect `GET /api/health` after startup and confirm:
-- `"ok": true`
-- `"firebaseConfigured": true`
-- `"adminAuthVerifyReady": true`
-- `"adminFirestoreReady": true`
-- `"mapsConfigured": true`
-
----
-
-## 4. Deployment & Rollback Procedures
-
-### Cloud Run Deployment (Recommended Full-Stack Runtime)
-1. Ensure `npm run build` succeeds and `dist/` contains `index.html`, `manifest.webmanifest`, and `sw.js`.
-2. Build and deploy container/source to Cloud Run with `--port=3000` and `NODE_ENV=production`.
-3. Select `patchup-backend@patchup-fff96.iam.gserviceaccount.com` as the Cloud Run runtime service account. Use ADC, not a downloaded key. Attach only required non-identity secrets (for example the optional `GEMINI_API_KEY`) via Secret Manager. See [production identity and admin access](docs/PRODUCTION_IDENTITY.md).
-4. Confirm Firebase Authentication Authorized Domains includes the deployed HTTPS origin.
-
-### Diagnosing HTML returned by an API request
-
-The Vite build contains only the frontend. Publishing `dist/` to a static SPA host
-does not deploy `server.ts` or its authenticated API handlers. If
-`/api/friends/search?q=&recommendations=true` returns `text/html` and the application
-shell, that host is not routing the request to the Express backend. A frontend
-JSON guard reports this safely but cannot restore the missing server.
-
-Deploy the full-stack runtime above and serve the app from that origin, or configure
-the frontend host's reverse proxy to forward `/api/*` to that runtime. Preserve the
-Authorization header and query string. Do not rewrite API requests to `index.html`
-or put Firebase Admin credentials in the browser. The Express server already
-registers its API handlers and JSON API 404 middleware before the SPA fallback.
-
-After routing is configured, verify `/api/health` returns JSON and the expected
-Firebase readiness flags. An unauthenticated `/api/friends/search` request should
-return a JSON authentication error, never HTML. Then sign in and verify search
-and recommendations. Deploy the matched rules to the correct default database in staging first. See the verification release checklist.
-
-### Rollback Procedure
-- **Application / Server Rollback**: Shift 100% of Cloud Run traffic back to the previous verified revision (`gcloud run services update-traffic <service> --to-revisions=<prev-rev>=100`).
-- **Firestore Rules Rollback**: Keep `firestore.rules` committed in Git alongside `firebase-blueprint.json` and `security_spec.md`. To revert rules, check out the last known-good commit and re-run `npm run lint:rules` before deploying rules.
-- **PWA Cache Recovery**: `vite-plugin-pwa` uses `registerType: 'autoUpdate'`, allowing newly deployed service workers to supersede stale caches automatically on reload.
-
----
-
-## 5. Backups, Retention & Quotas
-
-### Firestore Scheduled Backups
-Enable managed scheduled exports or Point-in-Time Recovery (PITR) on project `patchup-fff96` for database `(default)`:
-
-```bash
-gcloud firestore export gs://<your-backup-bucket>/patchup-$(date +%F) \
-  --project=patchup-fff96 \
-  --database='(default)'
-```
-
-### Cost & Quota Guardrails
-
-Google Maps JavaScript remains available for map display and pin selection. Server-side Google Geocoding v4 supports automatic capture location identification; see the activation gates below.
-- **Street identification**: Uses approved Google reverse geocoding, independently licensed Atlanta street centerline data where enabled, or reporter-observed street names as fallback.
-- **Gemini Guardrail**: Gemini runs only after explicit consent during capture, if `PATCHUP_IMAGE_AI_ENABLED=true`—never on map pan, feed load, or corridor listing.
-- **Rate Limiting**: Express rate limits protect `/api/geocode/reverse`, `/api/potholes/analyze`, `/api/potholes/submit`, `/api/games/score`, `/api/friends/*`, and `/api/admin/*`.
-- **Spark Tier Media Hygiene**: `/mediaObjects` caps binaries at `<= 400KB` (`<= 1280px` max edge). Monitor total Firestore document storage in the Firebase Console against Spark quotas.
-
----
-
-## 6. Monitoring, Error Reporting & Honest Community Reporting Policy
-
-- **Health Endpoint**: Monitor `GET /api/health` for uptime and Admin SDK / Firestore readiness (`adminFirestoreReady: true`).
-- **Quota Handling**: Maps `429` / `RESOURCE_EXHAUSTED` responses propagate cleanly to the UI (`gmp-quota-exceeded` banner) without crashing capture or map views.
-- **Community Integrity Policy**: PatchUp is an independent community-social platform. Never mark a report `submitted` without an administrator's verified external case/reference number and channel confirmation, and never mark a pothole `repaired` or award `Community Champion` badges until repair is credibly verified.
-
-## Automatic location identification (Google Geocoding v4)
-
-Capture continues to extract EXIF locally before photo compression; camera captures without GPS request a single device fix. Older uploads without GPS require a pin rather than silently using the reporter's current location. Pin changes trigger a debounced reverse lookup and invalidate prior street/candidate confirmation. The existing photo privacy review and explicit location confirmation are retained.
-
-The new provider is disabled by default, and runs only on Cloud Run using its attached, startup-verified `patchup-backend` service account via the metadata OAuth token endpoint. No server Maps API key is consumed. Google Maps browser key remains necessary for interactive maps. Geocoding API must be enabled, billing must be linked, and runtime identity must have `serviceusage.services.use` on the intended billing project. Validate permissions before activation; do not grant broad owner/editor roles. Metadata tokens use the general cloud-platform scope. Provider failure, missing results, ambiguity, or exhausted quotas permit independent street entry or the existing optional City centerline fallback. Google results alone do not establish jurisdiction. Google-only results are previews and cannot satisfy the durable street requirement.
-
-`PATCHUP_GOOGLE_GEOCODING_ENABLED=true` AND `PATCHUP_GOOGLE_GEOCODING_PREVIEW_APPROVED=true` allow live, explicitly opted-in, user-specific address previews only. The old STORAGE_APPROVED flag no longer authorizes anything. Google response values never enter `roadLookups`, community submissions, corridor data or server-approved export rows through the new path. Independent street proof must come from locally prepared Census TIGER/Line data, explicitly reuse-approved city data, or independently attested reporter observation. The Google preview may not be used as proof. Attribution and public terms/privacy are required. Review the actual accepted agreement, UI attribution/consent and historical records before activation. See docs/LOCATION_PROVENANCE.md.
-
-Shared Firestore transactions reserve every provider attempt before dispatch: 100/day, 3,000/month, 20/minute globally, 5/minute and 25/day per user (fixed UTC windows). Failed attempts count; no automatic retry. Counters fail closed on database failure. These are application limits, not Google project quotas; configure provider quotas separately to guard other clients and set billing alerts. The merge script does not enable billing, modify IAM/quotas, delete credentials, deploy, or revert PR #5. Live end-to-end validation is required after explicit activation.
-
-## Production hardening (PR #7 candidate)
-The existing transactional verificationBudgets reservation now has fixed ceilings: 100/day, 3,000/month, 10/minute globally, 25/day and 3/minute per UID (UTC fixed windows). Lower environment limits remain supported; invalid settings fail closed. Existing deployed values are not raised automatically. The approved model is gemini-3.5-flash-lite; the provider uses standard Gemini Developer API requests, one attempt, the existing 400 KB/1280 pixel input guard and 256 output-token limit. Cached verification and manual review behavior remain unchanged. Provider quota and budget settings are separate from app counters.
-
-Public community list queries retain their current 150/40 result bounds and 30-second cache; simultaneous cache misses now share one query per instance. This is not a Firestore spending cap. Direct client listeners, media reads, admin queries and egress still need monitoring; do not silently truncate completeness-sensitive queries. TTL deletions may incur charges. Review reads/writes/storage and budget alerts before enabling billing.
-
-The Dockerfile and deploy/cloud-run.service.yaml are templates for a later reviewed deployment. Build with restricted public browser keys via VITE_FIREBASE_API_KEY and VITE_GOOGLE_MAPS_API_KEY build args; never supply server secrets at build time. Use a reviewed image digest in the template, us-east1, dedicated runtime identity, 0 minimum / 1 maximum instance, 1 CPU / 1 GiB, concurrency 10 and request timeout 60 seconds. Instance limits are not absolute cost ceilings. Configure browser key referrers, Firebase authorized domains, serviceusage.services.use as needed, and Secret Manager access separately. The template deliberately disables paid providers, automatic acceptance, city lookup and email. Do not apply it until billing, independent dataset provisioning, provenance remediation and staging validation are authorized. Verify the container and live capture separately. No deployment or IAM modifications are part of this patch.
+No deployment, billing, IAM or data changes are triggered by this runbook.

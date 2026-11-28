@@ -1,13 +1,13 @@
-# PatchUp Security Specification (Phases 1–5)
+# PatchUp Security Specification — current release baseline
 
 ## 1. Data Invariants
 
-1. **PII Isolation**: Email addresses and account notification settings live strictly under `/users/{uid}/private/account` and are never readable by other authenticated or anonymous users.
+1. **PII Isolation**: Private account email and notification settings are stored under `/users/{uid}/private/account` and are not directly readable by other authenticated or anonymous clients. Server-side administrative records may also contain restricted identity information.
 2. **Server-Authoritative Community Infrastructure, Leaderboards & Canonical Potholes**: Direct client writes to `/potholes`, `/submissions`, `/geocodeCache`, `/friendships`, `/leaderboardStats`, `/achievements`, `/activityFeed`, `/streetSegments`, `/streetSegments/{id}/acceptedPotholes`, `/reports`, `/reports/{id}/supplements`, `/adminAudit`, and `/gameStats` are forbidden (`allow create, update, delete: if false`). All threshold evaluations, report cycles, and recounts run inside Express + Firebase Admin SDK transactions.
-3. **No Client-Assigned Roles**: Neither `/users/{uid}` nor `/users/{uid}/private/account` permits `role`, `isAdmin`, or `admin` shadow fields. Admin elevation occurs exclusively via Firebase Admin SDK custom claims (`admin: true`) or server-managed `/admins/{uid}`.
+3. **No Client-Assigned Roles**: Neither `/users/{uid}` nor `/users/{uid}/private/account` permits `role`, `isAdmin`, or `admin` shadow fields. Admin access requires a current verified, enabled Firebase account matching the server-only `PATCHUP_ADMIN_EMAILS` allowlist. Legacy custom claims and enrollment documents confer no authority.
 4. **Admin RBAC & Honest Reporting**: Admin endpoints (`/api/admin/*`) enforce verified ID tokens AND server-verified admin status (`403` otherwise). Reports cannot enter `submitted` status without an explicit external reference/case number and channel confirmation, and every admin override is logged to `/adminAudit`.
-5. **Isolated Spark-Free Media Store**: Binary compressed images (`Bytes <= 400000`, max `1280x1280`, MIME `image/jpeg|png|webp`) live exclusively inside `/mediaObjects/{mediaId}` and are served via authenticated owner/admin access or accepted public references at `/api/media/{mediaId}`. Client deletion and mutation are denied.
-6. **Temporal & ID Integrity**: All document IDs match `^[a-zA-Z0-9_-]+$` (`<= 128` chars), and client-written `joinedAt` / `createdAt` / `updatedAt` timestamps must equal `request.time`.
+5. **Server-managed media store**: Bounded images (up to 400,000 bytes, 1280px; JPEG/PNG/WebP input) are decoded and stored as JPEG evidence and thumbnails after required privacy checks. Firestore `/mediaObjects/{mediaId}` is the default; optional private GCS stores bytes behind server metadata. Owner/admin and eligible public references use `/api/media/:id`. Client deletion and mutation are denied.
+6. **Temporal & ID Integrity**: Client-controlled IDs and timestamps are checked by the corresponding rules/routes (including bounded alphanumeric IDs and `request.time` on mutable timestamps). Game statistic IDs have a separate 160-character bound.
 7. **Entertainment Score Isolation**: Minigame high scores in `/gameStats/{statId}` are server-written via `POST /api/games/score` with strict score bounds and score-to-duration plausibility checks, and never mutate `distinctPotholeCount`, `evidenceCount`, `leaderboardStats`, `achievements`, `streetSegments`, or `reports`.
 
 ## 2. The "Dirty Dozen+" Adversarial Payloads
@@ -26,14 +26,15 @@
 12. **Blanket Collection Scraping**: Unauthenticated visitor attempts `list` on `/users`, `/leaderboardStats`, `/friendships`, `/adminAudit`, `/mediaObjects`, `/geocodeCache`, `/gameStats`, or `/users/A/private`. -> `PERMISSION_DENIED`
 13. **Minigame Score Forgery**: User `A` writes directly to `/gameStats/A_pothole_runner` via client SDK (`PERMISSION_DENIED`) or submits `score: 49000` with `durationMs: 2000` to `/api/games/score` (`400 Bad Request`).
 
-## Image verification v2 invariants
+## Image verification and privacy invariants
 
-- Server-owned `/imageVerifications`, `/imageAnalysisCache`, `/verificationBudgets`, `/imageClaims`, `/contributionEffects`, and `/mediaRetired` deny every direct client read/write.
-- A verified-email authenticated uploader must own media exactly. The service verifies bounded image containers and strips metadata before provider calls; this is not full decoding or visual redaction.
-- Server decisions require strict observation validation, current release, expiry, owner, media ID, original byte digest and normalized content digest. Auto-accept requires an explicitly enabled, benchmark-approved release.
-- One transaction checks claims, reads all documents first, consumes the verification, claims normalized image content, records contribution, and updates counters/leaderboard/feed. Uncertain, unavailable and negative cases can only enter pending review.
+- Server-owned `/imageVerifications`, `/imageAnalysisCache`, `/verificationBudgets`, `/imageClaims`, `/contributionEffects`, `/mediaRetired` and `/redactionBudgets`, `/mediaBudgets`, `/geocodingBudgets` and `/roadLookups` deny every direct client read/write.
+- A verified-email authenticated uploader must own media exactly. The service decodes and re-encodes bounded images, strips metadata and requires successful DLP face/plate processing before pothole storage or verification.
+- Server decisions require strict observation validation, current release, expiry, owner, media ID, original byte digest and normalized content digest. Live verification requires paid mode and mandatory redaction; auto-accept additionally requires an explicitly enabled, benchmark-approved release.
+- One transaction checks claims, reads all documents first, consumes the verification, claims normalized image content, records contribution, and updates counters/leaderboard/feed. Uncertain, unavailable and negative cases can only enter pending review when a valid server-issued verification exists. Disabled image AI/paid mode returns no verification ID, blocking new submissions.
 - No arbitrary second-image or user-note instructions are passed to Gemini. Geographic duplicates are separate from image classification. No AI claim proves capture location or authenticity.
 - Pending review requires a verified administrator; approve/reject/merge is audited atomically with contribution credit. Rejection is terminal for that pending claim.
 - Owner-scoped cache, durable call and submission budgets, cooldown and provider circuit breaker constrain spend. Exact image hashing is not perceptual deduplication.
-- Provisional media and coordinates are not public. Approved photographs are intentionally public; metadata stripping does not remove faces, license plates or other incidental identifying pixels.
+- Provisional media and coordinates are not public. Approved photographs with valid server redaction proof may be public; detector completion does not guarantee removal of all identifying pixels. Older unprocessed pothole photos are withheld.
 - See `docs/IMAGE_VERIFICATION.md` for test limitations, deployment prerequisites, legacy-data limitations, and retention.
+- Google address previews are transient and private; durable street data requires independent provenance. Reports and repair information remain administrative. See `docs/PHOTO_REDACTION.md`, `docs/LOCATION_PROVENANCE.md` and `docs/PRODUCTION_IDENTITY.md`.

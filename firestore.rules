@@ -262,7 +262,7 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    // Isolated Spark-tier binary media store (single-doc get only; no list scraping)
+    // Server-only photo evidence/thumbnail metadata and bytes; guarded API delivery
     match /mediaObjects/{mediaId} { allow read, write: if false; }
     match /redactionBudgets/{id} { allow read, write: if false; }
     match /mediaBudgets/{id} { allow read, write: if false; }
@@ -346,7 +346,7 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      // Phase 1 media reference verification metadata (zero image bytes)
+      // Legacy media reference verification metadata (zero image bytes)
       match /storageChecks/{checkId} {
         allow get: if isValidId(uid) && isValidId(checkId) && isOwner(uid);
         allow list: if isValidId(uid) && isOwner(uid) && existing().userId == request.auth.uid;

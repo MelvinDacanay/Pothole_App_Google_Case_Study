@@ -1,4 +1,6 @@
 # TEMPLATE ONLY: replace IMAGE_URI with a reviewed built image digest.
+# Replace administrator/mailbox placeholders before any explicitly authorized deployment.
+# us-east1; private invoker access must be configured and verified separately.
 # No public IAM grant, billing change or secret creation is performed by this file.
 apiVersion: serving.knative.dev/v1
 kind: Service
@@ -40,5 +42,44 @@ spec:
           value: "false"
         - name: PATCHUP_CITY_ROADS_ENABLED
           value: 'false'
-        - name: PATCHUP_EMAIL_SENDING_ENABLED
+        - name: PATCHUP_TIGER_ROADS_FILE
+          value: '/app/data/tiger-roads.json'
+        - name: GEMINI_MODEL
+          value: 'gemini-3.5-flash-lite'
+        - name: PATCHUP_GEMINI_DATA_MODE
+          value: ''
+        - name: PATCHUP_BENCHMARK_APPROVED_VERSION
+          value: ''
+        - name: PATCHUP_ADMIN_EMAILS
+          value: 'REPLACE_WITH_APPROVED_ADMIN_EMAILS'
+        - name: PATCHUP_REPORT_FROM_EMAIL
+          value: 'REPLACE_WITH_APPROVED_REPORT_MAILBOX'
+        - name: PATCHUP_MEDIA_STORAGE
+          value: 'firestore'
+        - name: PATCHUP_MEDIA_MAX_NEW_BYTES
+          value: '250000000'
+        - name: PATCHUP_MEDIA_MAINTENANCE_ENABLED
           value: 'false'
+        - name: PATCHUP_AI_DAILY_LIMIT
+          value: '100'
+        - name: PATCHUP_AI_MONTHLY_LIMIT
+          value: '3000'
+        - name: PATCHUP_AI_MINUTE_LIMIT
+          value: '10'
+        - name: PATCHUP_AI_USER_DAILY_LIMIT
+          value: '25'
+        - name: PATCHUP_AI_USER_MINUTE_LIMIT
+          value: '3'
+        - name: PATCHUP_UPLOAD_USER_DAILY_LIMIT
+          value: '10'
+        - name: PATCHUP_UPLOAD_DAILY_LIMIT
+          value: '100'
+        - name: PATCHUP_UPLOAD_MONTHLY_LIMIT
+          value: '1000'
+        - name: PATCHUP_SUBMISSION_USER_DAILY_LIMIT
+          value: '25'
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: patchup-gemini-api-key
+              key: '1'

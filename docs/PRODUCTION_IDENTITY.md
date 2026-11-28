@@ -10,9 +10,9 @@ Project: `patchup-fff96`. Database: `(default)`. Runtime identity:
 | `roles/datastore.user` | Project | Firestore queries, writes, transactions, deletes |
 | `roles/firebaseauth.admin` | Project | Auth user lookup, revocation and legacy claims cleanup, account deletion |
 | `roles/storage.objectUser` | Specific private photo bucket, later | GCS object read/create/delete when enabled |
-| `roles/secretmanager.secretAccessor` | Each required secret, later | Access application API/OAuth secrets if using Secret Manager |
+| `roles/secretmanager.secretAccessor` | Individual existing secrets | Runtime Gemini secret; existing Maps Server secret retained but unused |
 
-The two initial roles were provisioned separately. The Auth Admin role is broader than the precise runtime operations; a custom role may be evaluated after runtime validation. Do not grant the runtime Owner, Editor, IAM Admin or project-wide Token Creator. The future DLP integration is not implemented by this patch; grant its specific permissions only when its API and implementation are ready. Gmail OAuth and Maps/Gemini keys are separate from Firebase ADC.
+The two initial roles were provisioned separately. The Auth Admin role is broader than the precise runtime operations; a custom role may be evaluated after runtime validation. Do not grant the runtime Owner, Editor, IAM Admin or project-wide Token Creator. Mandatory DLP redaction is implemented. The runtime has the project custom role `patchupPhotoRedactor` (`serviceusage.services.use`). Live authorization remains untested. Google address preview uses runtime OAuth; Gmail delivery is not implemented.
 
 In the Cloud Run service's security configuration, select the runtime identity above (equivalent deployment flag `--service-account=patchup-backend@patchup-fff96.iam.gserviceaccount.com`). The human deploying needs permission to act as that account; grant `roles/iam.serviceAccountUser` on this specific account only to approved deployers if necessary. Anyone able to deploy under this identity can indirectly use its privileges. Review deployments and keep billing administration separate. No deployment or IAM changes are performed by application startup.
 
@@ -24,7 +24,7 @@ Set `PATCHUP_ADMIN_EMAILS` as a server-only comma-separated list of the approved
 
 Bootstrap enrolls a verified, currently allowed account in the server-managed notification directory, without issuing new admin claims. Startup reconciles existing directory entries and removes ineligible entries, revokes sessions and removes legacy admin claims while retaining other claims. Claim-only legacy accounts that have no directory entry are reconciled on their next successful bootstrap request. Direct admin authorization does not rely on cleanup success or token expiration. A stale or removed administrator may need to sign in again after session revocation; ordinary user accounts are not deleted. Previously downloaded content cannot be recalled. The client checks admin access on login, focus and every minute while Admin Hub access is active.
 
-## Coordinated release (operator action, not performed by this patch)
+## Coordinated release (operator action)
 
 1. Test on a local/demo Firestore emulator. Use the existing default-database configuration.
 2. Ensure the server-side allowlist is configured correctly before deploying. Do not deploy a revision with stale allowlist values.
@@ -32,6 +32,8 @@ Bootstrap enrolls a verified, currently allowed account in the server-managed no
 4. Confirm `/api/health` indicates Firebase and Firestore readiness. Verify the service's attached identity through Cloud Run service configuration. Test verified approved users, ordinary users, an account with a stale admin claim/document, removal from the allowlist, Admin Hub reads and actions, private media, and account deletion on a disposable test account. Do not send real city emails or enable paid features during these checks.
 5. A rollback to an old claim-authorizing revision would reintroduce the vulnerability. Keep the stricter rules in place and prefer a forward fix. If an emergency rollback is necessary, stop admin traffic until a safe version is restored.
 
-This patch does not enable billing, change cloud IAM, create a key or secret, configure a bucket, implement DLP/Gmail delivery, or deploy any production resources.
+## Dedicated build identity
+
+`patchup-build@patchup-fff96.iam.gserviceaccount.com` has project `roles/logging.logWriter`, repository-specific `roles/artifactregistry.writer` and staging bucket `roles/storage.objectViewer`. Approved deployers can act as both identities. No direct secret access is granted to the builder; deployers can indirectly exercise runtime privileges. Source archive upload access must be verified separately. Always select the builder explicitly, not the default Compute account. Repository merges do not modify IAM or deploy resources.
 
 References: [Cloud Run service identity](https://docs.cloud.google.com/run/docs/configuring/services/service-identity), [runtime metadata contract](https://docs.cloud.google.com/run/docs/container-contract), and [ADC search order](https://docs.cloud.google.com/docs/authentication/application-default-credentials).
