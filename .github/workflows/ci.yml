@@ -27,7 +27,11 @@ jobs:
       PATCHUP_IMAGE_AI_ENABLED: "false"
       PATCHUP_AUTO_ACCEPT: "false"
       PATCHUP_CITY_ROADS_ENABLED: "false"
-      PATCHUP_EMAIL_SENDING_ENABLED: "false"
+      PATCHUP_GEMINI_DATA_MODE: ""
+      PATCHUP_GOOGLE_GEOCODING_ENABLED: "false"
+      PATCHUP_GOOGLE_GEOCODING_PREVIEW_APPROVED: "false"
+      PATCHUP_LOCATION_HISTORY_AUDITED: "false"
+      PATCHUP_CITY_ROADS_REUSE_APPROVED: "false"
 
     steps:
       - name: Checkout repository

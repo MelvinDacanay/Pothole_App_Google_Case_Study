@@ -16,6 +16,9 @@
 !tsconfig.json
 !postcss.config.*
 !tailwind.config.*
+!data/
+!data/tiger-roads.json
+!data/tiger-roads.sha256
 **/.env*
 **/*credentials*.json
 **/*service-account*.json

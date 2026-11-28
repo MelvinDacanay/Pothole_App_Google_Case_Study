@@ -1,0 +1,31 @@
+# Cloud Build directory uploads: allow only production build inputs.
+# Do not import .gitignore, which deliberately excludes generated road data.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!server.ts
+!server/
+!server/**
+!src/
+!src/**
+!public/
+!public/**
+!docs/
+!docs/**
+!firebase-applet-config.json
+!index.html
+!vite.config.ts
+!tsconfig.json
+!postcss.config.*
+!tailwind.config.*
+!data/
+!data/tiger-roads.json
+!data/tiger-roads.sha256
+**/.env*
+**/*credentials*.json
+**/*service-account*.json
+**/*service_account*.json
+**/*.pem
+**/*.key

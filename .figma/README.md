@@ -11,3 +11,5 @@ away, without setting up the project from scratch.
 To learn more about these files, see
 [Use Git with Figma Make and code layers](https://help.figma.com/hc/en-us/articles/44220165255063-Use-Git-with-Figma-Make-and-code-layers#h_01M5X47F86RN1RW0F8565KZHB8)
 in the Figma Help Center.
+
+These files are for design previews only. Static publication does not deploy the Express/Firebase backend. Never publish a preview with production credentials or configure automatic production deployment from this tooling. See [production operations](../OPERATIONS.md).

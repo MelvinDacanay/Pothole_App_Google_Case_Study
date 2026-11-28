@@ -1,17 +1,16 @@
-# PatchUp — image verification v2
+# PatchUp
 
-Reworked from the latest `PatchUpUIRedesign (2).zip` (the pre-Phase-1 Figma Make export). The existing React/Vite design, Express backend, Firebase project/database identity, map, capture, leaderboard, profiles, achievements, arcade and PWA remain the baseline. The image-verification subsystem has been replaced; see [implementation and release notes](docs/IMAGE_VERIFICATION.md).
+PatchUp is an independent Atlanta community pothole reporting PWA. **`main` is the canonical production source baseline.** Develop on feature branches and merge reviewed pull requests; do not restore older exports or overwrite current code. A merge is not a deployment or authorization to enable paid processing. The production Cloud Run application has not been deployed as of November 27, 2026.
 
-**Status:** implementation candidate, not production-certified. AI image calls and automatic acceptance default to disabled. Real Gemini accuracy, Firebase emulator/rules enforcement, a clean native dependency build and browser E2E testing are outstanding.
+## Application
 
-## Local setup (Antigravity)
+Home contains the Community Activity Feed, Community Gallery, Live Atlanta Street Map and Take a Pothole Photo. Leaderboard, Arcade and Profile are the other ordinary navigation destinations. Map inspection and photo capture are in-app flows. Admin Hub is restricted to verified allowlisted administrators. Five qualifying distinct approved potholes near each other on a street prepare a private report draft. Reports, agency responses and repair confirmations are administrative only; no automatic city email delivery or public repair tracking. Arcade scores do not count as pothole contributions.
 
-1. Extract into a **new directory** and commit the clean source before making changes. Do not overwrite your working directory or copy the old `.env` into the archive. Use Node 24 and npm.
-2. Run `npm ci`. If your platform lacks an optional native dependency, resolve the platform install issue locally rather than reusing another OS's `node_modules`.
-3. Copy `.env.example` to `.env`. Set your rotated `VITE_FIREBASE_API_KEY` (the public web key), `GEMINI_API_KEY`, Maps browser/server keys, and Firebase Admin credentials using your existing secure setup. The Firebase project and default database remain configured in `firebase-applet-config.json`; the old web key is deliberately blank. For local ADC, set `PATCHUP_USE_ADC=true` after configuring ADC. On Cloud Run attach the dedicated production service account and use ADC (no exported key). Configure `PATCHUP_ADMIN_EMAILS` server-side for every approved administrator; old claims and enrollment documents do not authorize access. See [production identity](docs/PRODUCTION_IDENTITY.md).
-4. Restore your originally supplied `public/fonts/coolvetica-rg.otf` locally from your own original project if you have rights to use it. The original font file is not redistributed in this archive; CSS retains its existing reference and fallback. All other original artwork and layout source are preserved.
-5. Use a **separate staging Firebase project/database** (update the client config and named database configuration for staging). Do not point a staging runtime at live Firestore with test accounts. Review and deploy the corresponding rules to staging before testing. Preserve existing Firestore indexes; compare the index file with existing configuration before deploying any indexes.
-6. Run:
+Capture extracts photo GPS locally when available, supports a one-time camera location or manual pin, and resolves an independent street name. A pin change invalidates the prior location confirmation. Optional Google address previews are transient, private and never a source of shared street records. Pothole uploads require automatic face/plate redaction on Cloud Run before storage, verification or publication; failure blocks upload. Detection is not guaranteed to catch every sensitive pixel. Older pothole photos lacking proof are withheld. Gemini image processing and automatic acceptance are disabled until their separate release gates pass. With image AI disabled, new Capture submissions are also blocked by the verification-ID requirement; the initial configuration is not a manual-only launch.
+
+## Development
+
+Use Node 24.22.3 and npm. Clone main, create a feature branch, run `npm ci`, copy `.env.example` to `.env` locally, and configure restricted browser keys and isolated development credentials. Never commit secrets or use live Firestore for disposable tests. Use a separate staging project/config or demo emulator; the production Firebase project and default database are configured in `firebase-applet-config.json`. Cloud Run runtime identity and redaction routing are production-specific; a separate staging deployment requires reviewed project-specific configuration, not simply a different Firebase config. Local UI development does not support real pothole uploads: redaction fails closed outside Cloud Run. Do not bypass it.
 
 ```sh
 npm run lint
@@ -21,25 +20,21 @@ npm run build
 npm run dev
 ```
 
-Open the local URL printed by the server. `/api/health` must return JSON; the Firebase admin readiness flags must be true to test submission. Test signed-in upload, pinning, manual review, admin approval, gallery and map. An unavailable backend is not a successful verification.
+For Firestore emulator tests, use Firebase CLI and Java 21: `firebase emulators:exec --only firestore --project demo-patchup-verification "npm run test:emulator"`. The CI workflow also scans credentials and audits dependencies. Passing CI does not establish live provider accuracy or production readiness. `npm run preview` is a static frontend preview, not the full-stack runtime. The full server uses `npm start` after the build. The `firebase-blueprint.json` documents stored-record shapes including legacy fields; server code and Firestore rules are authoritative, not that descriptive blueprint. The committed font is already present; do not restore it from an old archive. Review distribution rights before launch.
 
-## Enable AI only in an eligible test/staging environment
+## Production build
 
-```env
-GEMINI_MODEL=gemini-3.5-flash-lite
-PATCHUP_IMAGE_AI_ENABLED=true
-PATCHUP_AUTO_ACCEPT=false
-PATCHUP_BENCHMARK_APPROVED_VERSION=""
-```
+Read [OPERATIONS.md](OPERATIONS.md) before any build or release. Provision the reviewed Census dataset as `data/tiger-roads.json` using [data/README.md](data/README.md). It is a required Docker build input, not a checked-in generated file. Docker verifies its checksum and packages it into `/app/data/tiger-roads.json`. Supply only the restricted public Firebase and Maps browser keys as Docker build arguments. Server secrets are runtime-only.
 
-Keep live-user image processing disabled until you have checked current provider eligibility, data use, billing, and privacy disclosures. For free-tier experiments use only approved, non-sensitive test images. Paid production was the earlier recommendation because incidental sensitive information can appear in street photos. Confirm current terms and model availability in your own Google Cloud project; no API call was made while preparing this package.
+Production uses Cloud Run in us-east1, Firebase/Firestore `(default)`, dedicated build and backend identities, Artifact Registry and Secret Manager. See [production identity](docs/PRODUCTION_IDENTITY.md) and [Cloud Run template](deploy/cloud-run.service.yaml). The repository CI workflow verifies code and does not deploy. Do not attach automatic external deployments without approval. Do not deploy static `dist` alone. Figma configuration is retained only for design iteration.
 
-The user must affirm 18+ and choose either the Gemini check or manual review. With automatic acceptance disabled, even a positive AI observation requires administrator approval. No pending contribution earns credit.
+## Documentation
 
-## Evaluate and release
+- [Operations and release checklist](OPERATIONS.md)
+- [Security specification](security_spec.md)
+- [Photo redaction](docs/PHOTO_REDACTION.md) and [privacy/storage](docs/PHOTO_PRIVACY_STORAGE.md)
+- [Location provenance](docs/LOCATION_PROVENANCE.md) and [automatic capture](docs/AUTOMATIC_CAPTURE.md)
+- [Image verification](docs/IMAGE_VERIFICATION.md), [classification](docs/ATLDOT_CLASSIFICATION.md), [benchmark](docs/BENCHMARK.md)
+- [Account consent](docs/ACCOUNT_CONSENT.md) and [Admin Hub](docs/ADMIN_HUB.md)
 
-Read [benchmark protocol](docs/BENCHMARK.md) and [release checklist](docs/IMAGE_VERIFICATION.md). Run the included benchmark script on your labeled, compressed, non-sensitive photo set. Do not set the release approval environment variable until the held-out benchmark and security/E2E checks pass and your team approves the evidence. A 500-image benchmark is not included; the tiny test fixtures are generated format-check images, not an accuracy dataset.
-
-## Figma Make
-
-Import the source for design iteration only. Preserve `server/`, `server.ts`, API contracts, Firestore rules and tests when merging design changes. A static Figma Make deployment of `dist/` is not a deployment of the Express/Firebase Admin backend. Deploy the full stack on your own secure runtime and route `/api/*` there. Never paste `.env` or private credentials into Figma or the source archive.
+Do not release publicly until live privacy, location, authorization, browser/device and manual review tests pass; activate Gemini and automatic acceptance only under their separate approval gates.

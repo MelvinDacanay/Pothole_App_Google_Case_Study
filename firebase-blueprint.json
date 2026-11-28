@@ -119,7 +119,7 @@
     },
     "MediaObject": {
       "title": "MediaObject",
-      "description": "Isolated compressed image binary (Firestore Bytes <= 400KB) kept separate from pothole, submission, and user documents.",
+      "description": "Server-managed photo metadata and evidence/thumbnail bytes or private GCS pointers. Legacy fields remain readable for maintenance only; new pothole media must carry valid redaction proof. Runtime integrity checks and Firestore rules are authoritative.",
       "type": "object",
       "properties": {
         "mediaId": {
@@ -158,6 +158,75 @@
         "createdAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "thumbnailData": {
+          "type": "string",
+          "format": "byte"
+        },
+        "thumbnailBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 40000
+        },
+        "imageHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "thumbnailHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "uploadRequestHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceContentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sanitizerVersion": {
+          "type": "string"
+        },
+        "privacyVersion": {
+          "type": "string"
+        },
+        "redactionVersion": {
+          "type": "string"
+        },
+        "redactedImageHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "storageBackend": {
+          "type": "string",
+          "enum": [
+            "firestore",
+            "gcs"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready"
+          ]
+        },
+        "bucketName": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "thumbnailGeneration": {
+          "type": "string"
+        },
+        "cleanupAfter": {
+          "type": "string",
+          "format": "date-time"
         }
       },
       "required": [
@@ -167,7 +236,6 @@
         "sizeBytes",
         "width",
         "height",
-        "data",
         "createdAt"
       ]
     },
@@ -382,6 +450,13 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "streetSource": {
+          "type": "string",
+          "description": "Current independent values: tiger_line, city_centerline, user_observed; other historical values require review."
+        },
+        "locationPolicyVersion": {
+          "type": "string"
         }
       },
       "required": [
@@ -539,6 +614,16 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "streetSource": {
+          "type": "string",
+          "description": "Current independent values: tiger_line, city_centerline, user_observed; other historical values require review."
+        },
+        "locationPolicyVersion": {
+          "type": "string"
+        },
+        "verificationId": {
+          "type": "string"
         }
       },
       "required": [
@@ -567,7 +652,7 @@
     },
     "GeocodeCacheRecord": {
       "title": "GeocodeCacheRecord",
-      "description": "Server-only 30-day bounded reverse geocoding cache to avoid redundant Geocoding API calls.",
+      "description": "Legacy server-only geocoding cache schema, retained for historical audit/remediation. Current Google preview responses are never persisted.",
       "type": "object",
       "properties": {
         "coordKey": {
@@ -944,7 +1029,7 @@
     },
     "StreetSegmentRecord": {
       "title": "StreetSegmentRecord",
-      "description": "Road-aligned Atlanta street corridor segment with confidence classification and 5-pothole cycle counters (server-written only).",
+      "description": "Server-managed street grouping and five-pothole cycle counters; stored compatibility fields retained.",
       "type": "object",
       "properties": {
         "segmentId": {
@@ -1048,6 +1133,9 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "reportGroupVersion": {
+          "type": "string"
         }
       },
       "required": [
@@ -1120,7 +1208,7 @@
     },
     "CommunityReportRecord": {
       "title": "CommunityReportRecord",
-      "description": "Consolidated 5-distinct-pothole report packet for administrative review and honest external reporting.",
+      "description": "Private five-pothole report drafts and confirmed external reporting records, server-managed.",
       "type": "object",
       "properties": {
         "reportId": {
@@ -1203,7 +1291,8 @@
         },
         "googleSheetUrl": {
           "type": "string",
-          "maxLength": 512
+          "maxLength": 512,
+          "description": "Legacy export metadata; no Google Sheets export UI in current navigation."
         },
         "evidenceMateriallyChanged": {
           "type": "boolean"
@@ -1219,6 +1308,9 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "reportGroupVersion": {
+          "type": "string"
         }
       },
       "required": [
@@ -1415,7 +1507,7 @@
     },
     "VerificationBudget": {
       "title": "VerificationBudget",
-      "description": "Transactional daily/minute counters and circuit state",
+      "description": "Transactional UTC day/month/minute/user counters, submission counters and circuit state.",
       "type": "object",
       "additionalProperties": true
     },
@@ -1438,7 +1530,7 @@
     },
     "AccountConsent": {
       "type": "object",
-      "description": "Server-owned versioned account consent.",
+      "description": "Server-owned versioned consent. Current version requires adult self-attestation, AI/processing consent and terms acceptance; older records require renewal.",
       "properties": {
         "ageConfirmed": {
           "type": "boolean"
@@ -1452,14 +1544,107 @@
         "acceptedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "termsAccepted": {
+          "type": "boolean"
         }
       },
       "required": [
         "ageConfirmed",
         "aiConsent",
+        "termsAccepted",
         "version",
         "acceptedAt"
       ]
+    },
+    "RedactionBudget": {
+      "title": "RedactionBudget",
+      "description": "Server-owned DLP attempt/byte reservation counter.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "MediaBudget": {
+      "title": "MediaBudget",
+      "description": "Server-owned upload and cumulative byte allocation counter; allocation records do not expire.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "GeocodingBudget": {
+      "title": "GeocodingBudget",
+      "description": "Server-owned Google preview attempt counter; no response content.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RoadLookup": {
+      "title": "RoadLookup",
+      "description": "Server-owned short-lived independent street proof, never a Google response.",
+      "type": "object",
+      "properties": {
+        "streetName": {
+          "type": "string"
+        },
+        "jurisdiction": {
+          "type": "string",
+          "enum": [
+            "atldot",
+            "gdot",
+            "unknown"
+          ]
+        },
+        "streetSource": {
+          "type": "string",
+          "enum": [
+            "tiger_line",
+            "city_centerline"
+          ]
+        },
+        "locationPolicyVersion": {
+          "type": "string"
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AdminDirectory": {
+      "title": "AdminDirectory",
+      "description": "Server-managed enrollment directory for administrative notifications; not an authorization source.",
+      "type": "object",
+      "properties": {}
     }
   },
   "firestore": {
@@ -1479,13 +1664,13 @@
       "schema": {
         "$ref": "#/entities/StorageVerificationRecord"
       },
-      "description": "Phase 1 media reference metadata checks."
+      "description": "Legacy media reference verification metadata; no image bytes."
     },
     "/mediaObjects/{mediaId}": {
       "schema": {
         "$ref": "#/entities/MediaObject"
       },
-      "description": "Spark-tier free isolated binary media store served via /api/media/{mediaId}."
+      "description": "Server-only photo evidence/thumbnail metadata and bytes or private storage pointers; guarded /api/media delivery."
     },
     "/potholes/{potholeId}": {
       "schema": {
@@ -1503,7 +1688,7 @@
       "schema": {
         "$ref": "#/entities/GeocodeCacheRecord"
       },
-      "description": "Server-only reverse geocoding cache."
+      "description": "Legacy server-only cache retained for provenance review, not used for new Google previews."
     },
     "/friendships/{friendshipId}": {
       "schema": {
@@ -1533,13 +1718,13 @@
       "schema": {
         "$ref": "#/entities/ActivityFeedEvent"
       },
-      "description": "Public-safe street-level and achievement activity events."
+      "description": "Server-owned activity events; public community endpoint projects safe fields."
     },
     "/streetSegments/{segmentId}": {
       "schema": {
         "$ref": "#/entities/StreetSegmentRecord"
       },
-      "description": "Road-aligned street corridor segments (server-written only)."
+      "description": "Server-managed street grouping records; private technical data."
     },
     "/streetSegments/{segmentId}/acceptedPotholes/{potholeId}": {
       "schema": {
@@ -1551,7 +1736,7 @@
       "schema": {
         "$ref": "#/entities/CommunityReportRecord"
       },
-      "description": "Consolidated 5-pothole community report cycles (server-written only)."
+      "description": "Private five-pothole report cycles; admin API only."
     },
     "/reports/{reportId}/supplements/{supplementId}": {
       "schema": {
@@ -1618,6 +1803,36 @@
         "$ref": "#/entities/AccountConsent"
       },
       "description": "Server-only account consent record."
+    },
+    "/redactionBudgets/{id}": {
+      "schema": {
+        "$ref": "#/entities/RedactionBudget"
+      },
+      "description": "Server-owned DLP attempt/byte reservation counter."
+    },
+    "/mediaBudgets/{id}": {
+      "schema": {
+        "$ref": "#/entities/MediaBudget"
+      },
+      "description": "Server-owned upload and cumulative byte allocation counter; allocation records do not expire."
+    },
+    "/geocodingBudgets/{id}": {
+      "schema": {
+        "$ref": "#/entities/GeocodingBudget"
+      },
+      "description": "Server-owned Google preview attempt counter; no response content."
+    },
+    "/roadLookups/{id}": {
+      "schema": {
+        "$ref": "#/entities/RoadLookup"
+      },
+      "description": "Server-owned short-lived independent street proof, never a Google response."
+    },
+    "/admins/{uid}": {
+      "schema": {
+        "$ref": "#/entities/AdminDirectory"
+      },
+      "description": "Server-managed enrollment directory for administrative notifications; not an authorization source."
     }
   }
 }
