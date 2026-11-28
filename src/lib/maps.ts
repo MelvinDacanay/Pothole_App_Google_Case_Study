@@ -145,6 +145,102 @@ export interface PotholeSubmission {
   updatedAt?: Timestamp;
 }
 
+export type CaseStatus =
+  | 'drafted'
+  | 'submitted_unconfirmed'
+  | 'case_logged'
+  | 'acknowledged'
+  | 'resolved'
+  | 'reopened';
+
+export type ReportChannel = 'atl311' | 'gdot' | 'email' | 'other';
+export type ReportMethod = 'official_portal' | 'phone' | 'email';
+
+export interface CaseEvent {
+  type: string;
+  note?: string;
+  externalCaseRef?: string;
+  atMillis: number;
+}
+
+export type DeadlineSource = 'user_recorded_from_agency';
+
+export type FollowUpStatus =
+  | 'draft_prepared'
+  | 'contact_initiated'
+  | 'contact_confirmed'
+  | 'awaiting_response'
+  | 'agency_reference_recorded'
+  | 'resolved';
+
+export type FollowUpKind = 'overdue' | 'ordinary';
+
+export interface CaseFollowUp {
+  followUpId: string;
+  reasonId: string;
+  reasonLabel: string;
+  kind: FollowUpKind;
+  status: FollowUpStatus;
+  contactMethod?: 'official_portal' | 'phone' | 'email' | 'none';
+  externalCaseRef?: string;
+  newReference?: string;
+  newEvidenceNotes?: string;
+  draftedAtMillis?: number;
+  contactConfirmedAtMillis?: number;
+  referenceSavedAtMillis?: number;
+}
+
+export interface MyCaseItem {
+  caseId: string;
+  potholeId: string;
+  streetName: string;
+  formattedAddress: string;
+  lat: number;
+  lng: number;
+  jurisdiction: 'atldot' | 'gdot' | 'unknown';
+  channel: ReportChannel;
+  reportMethod?: ReportMethod;
+  status: CaseStatus;
+  externalCaseRef?: string;
+  primaryPhotoUrl?: string;
+  primaryMediaId?: string;
+  notes?: string;
+  events: CaseEvent[];
+  followUps: CaseFollowUp[];
+  deadlineSource?: DeadlineSource;
+  deadlineCitation?: string;
+  agencyClosureDamageRemains?: boolean;
+  submittedAtMillis?: number;
+  createdAtMillis?: number;
+  updatedAtMillis?: number;
+  expectedCompletionAtMillis?: number;
+  deadlineRecordedAtMillis?: number;
+  personalFollowUpAtMillis?: number;
+  potholeStatus?: PotholeStatus;
+  potholeUpdatedAtMillis?: number;
+}
+
+export interface PublicContributorProfile {
+  uid: string;
+  username: string;
+  displayName: string;
+  photoURL?: string;
+  homeNeighborhood?: string;
+  distinctPotholeCount: number;
+  evidenceCount: number;
+  unlockedBadgesCount: number;
+  joinedAtMillis?: number;
+}
+
+export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
+  drafted: 'Report Drafted',
+  submitted_unconfirmed: 'Submitted (Unconfirmed)',
+  case_logged: 'Official Case Logged',
+  acknowledged: 'Acknowledged by Agency',
+  resolved: 'Resolved',
+  reopened: 'Reopened',
+};
+
 export interface DuplicateCandidateSummary {
   potholeId: string;
   lat: number;

@@ -1,7 +1,8 @@
 import { ProtectedImage } from '../components/ProtectedImage';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Camera, Layers, MapPin, ShieldCheck, X } from 'lucide-react';
+import { Camera, ClipboardList, Layers, MapPin, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { logCase } from '../hooks/useCases';
 import { useCommunityPotholes } from '../hooks/usePotholes';
 import { useMySubmissions } from '../hooks/usePotholes';
 import {
@@ -21,6 +22,7 @@ interface MapViewProps {
   onSelectPothole: (pothole: PotholeRecord | null) => void;
   onAddEvidence: (pothole: PotholeRecord) => void;
   onStartCapture: () => void;
+  onOpenCase?: (caseId: string) => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -30,6 +32,7 @@ export const MapView: React.FC<MapViewProps> = ({
   onSelectPothole,
   onAddEvidence,
   onStartCapture,
+  onOpenCase,
 }) => {
   const { user } = useAuth();
   const { potholes, loading } = useCommunityPotholes();
@@ -43,6 +46,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const [onlyMine, setOnlyMine] = useState(false);
   const [evidenceItems, setEvidenceItems] = useState<PotholeSubmission[]>([]);
   const [loadingEvidence, setLoadingEvidence] = useState(false);
+  const [trackingCase, setTrackingCase] = useState(false);
+  const [trackError, setTrackError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!pendingFocusPotholeId || potholes.length === 0) return;
@@ -233,6 +238,34 @@ export const MapView: React.FC<MapViewProps> = ({
                 {selectedPothole.aiReviewSummary}
               </div>
             )}
+
+            {user && selectedPothole.primaryContributorUid === user.uid && onOpenCase && (
+              <button
+                type="button"
+                disabled={trackingCase}
+                onClick={() => {
+                  setTrackingCase(true);
+                  setTrackError(null);
+                  void logCase(user, {
+                    potholeId: selectedPothole.potholeId,
+                    channel: selectedPothole.jurisdiction === 'gdot' ? 'gdot' : 'atl311',
+                    status: 'drafted',
+                  })
+                    .then((data) => {
+                      if (typeof data.caseId === 'string') onOpenCase(data.caseId);
+                    })
+                    .catch((err: unknown) => {
+                      setTrackError(err instanceof Error ? err.message : 'Unable to start case tracking.');
+                    })
+                    .finally(() => setTrackingCase(false));
+                }}
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E8DFC5] bg-white hover:bg-[#F7F7F8] text-[#2D2B35] text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                <ClipboardList className="w-4 h-4" />
+                <span>{trackingCase ? 'Opening case…' : 'Track official ATL311 / GDOT case'}</span>
+              </button>
+            )}
+            {trackError && <p className="text-xs text-[#DC2626]">{trackError}</p>}
 
             <button
               type="button"

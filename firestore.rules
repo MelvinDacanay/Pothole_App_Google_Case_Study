@@ -129,10 +129,16 @@ service cloud.firestore {
       && isValidId(data.notificationId)
       && data.uid == uid
       && isValidId(data.uid)
-      && data.type in [
-        'friend_request', 'friend_accepted', 'badge_unlocked',
-        'leaderboard_milestone'
-      ]
+      && (
+        data.type in [
+          'friend_request', 'friend_accepted', 'badge_unlocked', 'leaderboard_milestone'
+        ]
+        || data.type in [
+          'case_awaiting_ref', 'case_deadline_approaching', 'case_deadline_passed',
+          'case_personal_reminder', 'case_agency_closed', 'case_repair_verified',
+          'case_followup_ref_saved'
+        ]
+      )
       && data.title is string && data.title.size() >= 1 && data.title.size() <= 96
       && data.body is string && data.body.size() >= 1 && data.body.size() <= 240
       && (!('relatedId' in data) || (data.relatedId is string && data.relatedId.size() <= 128))
@@ -224,7 +230,18 @@ service cloud.firestore {
     }
 
     function isCommunityNotification() {
-      return existing().type in ['friend_request', 'friend_accepted', 'badge_unlocked', 'leaderboard_milestone'];
+      return existing().type in [
+          'friend_request', 'friend_accepted', 'badge_unlocked', 'leaderboard_milestone'
+        ]
+        || existing().type in [
+          'case_awaiting_ref', 'case_deadline_approaching', 'case_deadline_passed',
+          'case_personal_reminder', 'case_agency_closed', 'case_repair_verified',
+          'case_followup_ref_saved'
+        ];
+    }
+
+    match /potholeCases/{caseId} {
+      allow read, write: if false;
     }
 
     // Per-user in-app notifications (owner read; owner may mark read; server creates)
